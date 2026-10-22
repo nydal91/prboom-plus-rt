@@ -20,8 +20,8 @@ BT="$ANDROID_HOME/build-tools/35.0.0"
 ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
 API=31
 ABI=arm64-v8a
-VERSION_CODE="${VERSION_CODE:-1}"
-VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android1}"
+VERSION_CODE="${VERSION_CODE:-2}"
+VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android2}"
 TOOLCHAIN=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
            -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-$API -DCMAKE_BUILD_TYPE=Release)
 JOBS="$(nproc)"
@@ -58,7 +58,7 @@ RTGL1_SDK_PATH="$RTGL1_SDK_PATH" cmake --build "$B/prboom" -j"$JOBS" >> "$B/prbo
 echo "== Java"
 J="$B/java"; rm -rf "$J"; mkdir -p "$J/classes" "$J/dex"
 javac -nowarn -Xlint:none -Xlint:-options --release 8 -XDstringConcat=inline -encoding UTF-8 -classpath "$ANDROID_JAR" -d "$J/classes" \
-    "$SDL2_SRC"/android-project/app/src/main/java/org/libsdl/app/*.java \
+    "$HERE"/app/java/org/libsdl/app/*.java \
     "$HERE"/app/java/org/prboomplus/rt/*.java
 "$BT/d8" --release --min-api $API --lib "$ANDROID_JAR" --output "$J/dex" $(find "$J/classes" -name '*.class')
 

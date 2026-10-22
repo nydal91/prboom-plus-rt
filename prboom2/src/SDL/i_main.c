@@ -466,6 +466,14 @@ void I_SafeExit(int rc)
 {
   atexit_listentry_t *entry;
 
+#ifdef __ANDROID__
+  // the launcher treats a leftover marker as a crash
+  if (rc == 0)
+  {
+    remove("running.txt");
+  }
+#endif
+
   // Run through all exit functions
 
   while ((entry = exit_funcs))
@@ -637,6 +645,15 @@ int main(int argc, char **argv)
       setenv("HOME", home, 1);
     }
     chdir(home);
+
+    // Engine log for the error report LauncherActivity shows after a failure;
+    // unbuffered, so it's complete even after a crash
+    if (freopen("prboom.log", "w", stdout))
+    {
+      setvbuf(stdout, NULL, _IONBF, 0);
+      dup2(fileno(stdout), fileno(stderr));
+      setvbuf(stderr, NULL, _IONBF, 0);
+    }
   }
 #endif
 
