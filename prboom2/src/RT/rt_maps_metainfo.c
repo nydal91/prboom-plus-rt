@@ -300,13 +300,24 @@ static rt_map_metainfo_t *GetMapMetaInfo(int episode, int map)
 }
 
 
+#ifndef RT_DEFAULT_SECTOR_LIGHT_WEIGHT
+  #define RT_DEFAULT_SECTOR_LIGHT_WEIGHT 1.0f
+#endif
+
 dboolean RT_GetSectorLightLevelWeight(int sectornum, float *out_weight, RgFloat3D *out_color)
 {
   const rt_map_metainfo_t *mp = GetMapMetaInfo(gameepisode, gamemap);
 
   if (mp == NULL)
   {
-    return false;
+    // No hand-made metainfo for this map (e.g. Freedoom, PWADs, or the release's
+    // ovrd/map_metainfo_*.txt is missing): light every sector from its own light
+    // level, which the caller multiplies in, so dark sectors stay dark.
+    *out_weight = RT_DEFAULT_SECTOR_LIGHT_WEIGHT;
+    out_color->data[0] = 1.0f;
+    out_color->data[1] = 1.0f;
+    out_color->data[2] = 1.0f;
+    return true;
   }
 
   if (mp->sectors == NULL || sectornum >= mp->sectorcount)
