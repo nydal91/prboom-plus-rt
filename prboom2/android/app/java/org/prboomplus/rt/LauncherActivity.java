@@ -69,9 +69,15 @@ public class LauncherActivity extends Activity {
 
         importWadFromIntent(home);
 
-        String report = collectReport(home);
+        // "Show log" app shortcut (long-press the icon)
+        if (ACTION_SHOW_LOG.equals(getIntent() != null ? getIntent().getAction() : null)) {
+            showReport(collectReport(home, true), "Game log");
+            return;
+        }
+
+        String report = collectReport(home, false);
         if (report != null) {
-            showReport(report);
+            showReport(report, "The game stopped last time");
         } else {
             startGame();
         }
@@ -88,12 +94,14 @@ public class LauncherActivity extends Activity {
     // --- error report
 
     /** Returns a report if the previous run ended with an error, or never reached a clean exit. */
-    private String collectReport(File home) {
+    static final String ACTION_SHOW_LOG = "org.prboomplus.rt.SHOW_LOG";
+
+    private String collectReport(File home, boolean always) {
         String error = readFile(new File(home, ERROR_FILE), 4000);
         String java = readFile(new File(home, JAVA_CRASH_FILE), 8000);
         boolean unclean = new File(home, RUNNING_FILE).isFile();
 
-        if (error == null && java == null && !unclean) {
+        if (!always && error == null && java == null && !unclean) {
             return null;
         }
 
@@ -108,10 +116,10 @@ public class LauncherActivity extends Activity {
         if (java != null) {
             sb.append("Java:\n").append(java.trim()).append("\n\n");
         }
-        if (error == null && java == null) {
+        if (!always && error == null && java == null) {
             sb.append("The game closed unexpectedly (native crash).\n\n");
         }
-        String log = readTail(new File(home, LOG_FILE), 6000);
+        String log = readTail(new File(home, LOG_FILE), always ? 20000 : 6000);
         if (log != null) {
             sb.append("Log (end):\n").append(log.trim()).append('\n');
         }
@@ -126,7 +134,7 @@ public class LauncherActivity extends Activity {
         }
     }
 
-    private void showReport(final String report) {
+    private void showReport(final String report, String title) {
         TextView text = new TextView(this);
         text.setText(report);
         text.setTextIsSelectable(true);
@@ -138,7 +146,7 @@ public class LauncherActivity extends Activity {
         scroll.addView(text);
 
         final AlertDialog dlg = new AlertDialog.Builder(this)
-            .setTitle("The game stopped last time")
+            .setTitle(title)
             .setView(scroll)
             .setPositiveButton("Start game", (d, w) -> startGame())
             .setNegativeButton("Close", (d, w) -> { clearReport(getFilesDir()); finish(); })

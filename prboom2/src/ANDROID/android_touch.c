@@ -193,6 +193,16 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
         f->role = ROLE_LOOK;
       }
 
+      {
+        static int logged = 0;
+        static const char *names[] = { "none", "stick", "look", "button" };
+        if (logged < 200)
+        {
+          logged++;
+          lprintf(LO_INFO, "touch: finger down %.2f,%.2f -> %s\n", x, y, names[f->role]);
+        }
+      }
+
       if (f->role == ROLE_KEY)
       {
         f->down_tic = touch_tic;
@@ -346,6 +356,17 @@ void AndroidTouch_Draw(void)
 {
   const int W = SCREENWIDTH, H = SCREENHEIGHT;
   const byte gray = 96; // a mid gray in the Doom palette
+
+  // a marker under every finger, so it's visible whether touches arrive
+  for (int i = 0; i < MAX_FINGERS; i++)
+  {
+    if (fingers[i].role != ROLE_NONE)
+    {
+      int s = H / 20;
+      Outline((int)(fingers[i].x * W) - s, (int)(fingers[i].y * H) - s, 2 * s, 2 * s, 176);
+      Outline((int)(fingers[i].x * W) - s + 1, (int)(fingers[i].y * H) - s + 1, 2 * s - 2, 2 * s - 2, 176);
+    }
+  }
 
   if (gamestate != GS_LEVEL || menuactive)
   {

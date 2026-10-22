@@ -1553,8 +1553,12 @@ void I_UpdateVideoMode(void)
 
 static void ActivateMouse(void)
 {
+#ifndef __ANDROID__
+  // On Android this requests pointer capture on SDL's view, which is meant for
+  // physical mice and can swallow touchscreen input. Touch controls don't need it.
   SDL_SetRelativeMouseMode(SDL_TRUE);
   SDL_GetRelativeMouseState(NULL, NULL);
+#endif
 }
 
 static void DeactivateMouse(void)
