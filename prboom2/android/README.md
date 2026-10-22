@@ -34,8 +34,24 @@ WADs placed in `Android/data/org.prboomplus.rt/files/` are used too.
 The stick runs when pushed far. Back opens the menu. In menus, tap an item
 to choose it, or drag anywhere to move the cursor (hold to repeat); on the
 settings screens the first tap highlights a row and a second tap changes it,
-then drag left/right to pick a value and tap to confirm. Bluetooth keyboards and gamepads
-work through SDL.
+then drag left/right to pick a value and tap to confirm. Bluetooth keyboards work too.
+
+## Controllers
+
+Xbox, PlayStation and other Bluetooth/USB controllers work as soon as they
+are connected:
+
+| In game | | In menus | |
+|---|---|---|---|
+| Left stick / d-pad | move, strafe | Left stick / d-pad | move the cursor |
+| Right stick | turn | A | select (yes in prompts) |
+| RT | fire | B | back (no in prompts) |
+| LT or B | run | Start | close the menu |
+| A or X | use / open | | |
+| Y | flashlight | | |
+| LB / RB | previous / next weapon | | |
+| Start | menu | | |
+| View / Back | automap | | |
 
 ## Known limitations
 

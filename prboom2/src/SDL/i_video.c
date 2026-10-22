@@ -33,6 +33,7 @@
  */
 
 #ifdef HAVE_CONFIG_H
+#include "i_gamepad.h"
 #include "config.h"
 #endif
 
@@ -248,6 +249,10 @@ while (SDL_PollEvent(Event))
     continue;
   }
 #endif
+  if (I_Gamepad_HandleEvent(Event))
+  {
+    continue;
+  }
 #ifdef __ANDROID__
   // Android destroys the window's surface in the background and makes a new
   // one on return; SDL blocks this loop while paused. RT swaps the surface
@@ -416,6 +421,7 @@ void I_StartTic (void)
   AndroidTouch_Tic();
 #endif
   I_GetEvent();
+  I_Gamepad_Tic();
 
   I_ReadMouse();
 
@@ -455,6 +461,7 @@ static void I_InitInputs(void)
   }
 
   I_InitJoystick();
+  I_Gamepad_Init();
 }
 /////////////////////////////////////////////////////////////////////////////
 

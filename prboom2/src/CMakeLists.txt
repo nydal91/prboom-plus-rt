@@ -193,6 +193,8 @@ set(MUS2MID_SRC
 
 set(SDLDOOM_SOURCES
     SDL/i_joy.c
+    SDL/i_gamepad.c
+    SDL/i_gamepad.h
     SDL/i_main.c
     SDL/i_network.c
     SDL/i_sound.c
