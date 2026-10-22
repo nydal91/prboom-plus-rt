@@ -452,6 +452,77 @@ void I_Gamepad_GetMove(int *forward, int *side, int *turn)
 
 int gamepad_rumble = 1;
 
+#ifdef __ANDROID__
+#include <jni.h>
+
+static void AndroidRumble(float low, float high, int ms)
+{
+  static jclass cls = NULL;
+  static jmethodID mid = NULL;
+  static int failed = 0, last_motors = -1;
+  JNIEnv *env;
+  jint motors;
+
+  if (failed)
+  {
+    return;
+  }
+  env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+  if (!env)
+  {
+    return;
+  }
+  if (!mid)
+  {
+    // load through the activity's class loader, which knows the app's classes
+    jobject activity = (jobject)SDL_AndroidGetActivity();
+    jclass act_cls = activity ? (*env)->GetObjectClass(env, activity) : NULL;
+    jmethodID get_loader = act_cls ? (*env)->GetMethodID(env, act_cls, "getClassLoader", "()Ljava/lang/ClassLoader;") : NULL;
+    jobject loader = get_loader ? (*env)->CallObjectMethod(env, activity, get_loader) : NULL;
+    jclass loader_cls = loader ? (*env)->GetObjectClass(env, loader) : NULL;
+    jmethodID load = loader_cls ? (*env)->GetMethodID(env, loader_cls, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;") : NULL;
+    jstring name = (*env)->NewStringUTF(env, "org.prboomplus.rt.GamepadRumble");
+    jclass local = load ? (jclass)(*env)->CallObjectMethod(env, loader, load, name) : NULL;
+
+    if ((*env)->ExceptionCheck(env))
+    {
+      (*env)->ExceptionClear(env);
+      local = NULL;
+    }
+    if (local)
+    {
+      cls = (jclass)(*env)->NewGlobalRef(env, local);
+      mid = (*env)->GetStaticMethodID(env, cls, "rumble", "(FFI)I");
+    }
+    (*env)->DeleteLocalRef(env, name);
+    if (local) (*env)->DeleteLocalRef(env, local);
+    if (loader_cls) (*env)->DeleteLocalRef(env, loader_cls);
+    if (loader) (*env)->DeleteLocalRef(env, loader);
+    if (act_cls) (*env)->DeleteLocalRef(env, act_cls);
+    if (activity) (*env)->DeleteLocalRef(env, activity);
+    if (!mid)
+    {
+      if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+      lprintf(LO_WARN, "I_Gamepad: rumble helper not found\n");
+      failed = 1;
+      return;
+    }
+  }
+
+  motors = (*env)->CallStaticIntMethod(env, cls, mid, (jfloat)low, (jfloat)high, (jint)ms);
+  if ((*env)->ExceptionCheck(env))
+  {
+    (*env)->ExceptionClear(env);
+    motors = 0;
+  }
+  if (motors != last_motors)
+  {
+    lprintf(LO_INFO, "I_Gamepad: rumble drives %d motor(s)\n", (int)motors);
+    last_motors = motors;
+  }
+}
+#endif
+
 void I_Gamepad_Rumble(float low, float high, int ms)
 {
   int i;
@@ -461,6 +532,12 @@ void I_Gamepad_Rumble(float low, float high, int ms)
   {
     return;
   }
+#ifdef __ANDROID__
+  // SDL 2 can't rumble controllers on Android: GamepadRumble.java does it
+  (void)i; (void)lo; (void)hi;
+  AndroidRumble(low, high, ms);
+  return;
+#endif
   lo = (Uint16)(BETWEEN(0.0f, 1.0f, low) * 65535.0f);
   hi = (Uint16)(BETWEEN(0.0f, 1.0f, high) * 65535.0f);
   for (i = 0; i < MAX_PADS; i++)
