@@ -450,6 +450,10 @@ default_t defaults[] =
 #ifdef _WIN32
   {"snd_midiplayer",{NULL, &snd_midiplayer},{0,"fluidsynth"},UL,UL,def_str,ss_none},
   {"snd_soundfont",{NULL, &snd_soundfont},{0,"TimGM6mb.sf2"},UL,UL,def_str,ss_none}, // soundfont name for synths that support it
+#elif !defined(HAVE_MIXER)
+  // without SDL_mixer, the built-in OPL2 synth plays the music
+  {"snd_midiplayer",{NULL, &snd_midiplayer},{0,"opl2"},UL,UL,def_str,ss_none},
+  {"snd_soundfont",{NULL, &snd_soundfont},{0,"/usr/share/sounds/sf3/default-GM.sf3"},UL,UL,def_str,ss_none}, // soundfont name for synths that support it
 #else
   {"snd_midiplayer",{NULL, &snd_midiplayer},{0,"sdl"},UL,UL,def_str,ss_none},
   {"snd_soundfont",{NULL, &snd_soundfont},{0,"/usr/share/sounds/sf3/default-GM.sf3"},UL,UL,def_str,ss_none}, // soundfont name for synths that support it
@@ -466,7 +470,7 @@ default_t defaults[] =
   {"mus_fluidsynth_chorus",{&mus_fluidsynth_chorus},{0},0,1,def_bool,ss_none},
   {"mus_fluidsynth_reverb",{&mus_fluidsynth_reverb},{0},0,1,def_bool,ss_none},
   {"mus_fluidsynth_gain",{&mus_fluidsynth_gain},{50},0,1000,def_int,ss_none}, // NSM  fine tune fluidsynth output level
-  {"mus_opl_gain",{&mus_opl_gain},{50},0,1000,def_int,ss_none}, // NSM  fine tune opl output level
+  {"mus_opl_gain",{&mus_opl_gain},{100},0,1000,def_int,ss_none}, // NSM  fine tune opl output level
 
   {"Video settings",{NULL},{0},UL,UL,def_none,ss_none},
   {"videomode",{NULL, &default_videomode},{0,"RT"},UL,UL,def_str,ss_none},

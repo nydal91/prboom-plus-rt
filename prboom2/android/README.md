@@ -60,7 +60,8 @@ with "Controller rumble" in Options → Display Options.
 
 - Switching away from the app pauses the game; the renderer rebuilds its
   Vulkan surface when you return.
-- No music (sound effects work); SDL2_mixer isn't built.
+- Music plays through the built-in OPL2 synth (the Sound Blaster / AdLib
+  sound of DOS Doom); SDL2_mixer, MP3/OGG music packs and soundfonts aren't built.
 - Indoor lighting is derived from the maps' sector light levels; the hand
   made per-map light data of the desktop release isn't included.
 - Speed depends heavily on the GPU. It renders at half resolution with

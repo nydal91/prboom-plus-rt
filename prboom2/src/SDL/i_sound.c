@@ -1639,6 +1639,15 @@ void M_ChangeMIDIPlayer(void)
   return;
 #endif
 
+#ifndef HAVE_MIXER
+  // "sdl" means SDL_mixer, which isn't built in: play the music with the
+  // built-in OPL2 synth (the Sound Blaster / AdLib sound of DOS Doom) instead
+  if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
+  {
+    snd_midiplayer = midiplayers[midi_player_opl2];
+  }
+#endif
+
   if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
   {
     experimental_music = false;
