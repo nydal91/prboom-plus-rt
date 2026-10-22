@@ -6,6 +6,8 @@
 #   RTGL1_SDK_PATH  RayTracedGL1 checkout (ray-query-android branch)
 #   SDL2_SRC        SDL 2.30.x source checkout
 #   IWAD            path to freedoom1.wad (bundled as the default game)
+# Optional:
+#   IWAD2           path to freedoom2.wad, bundled as the base game for Doom II mods
 #   HOST_BUILD      a native (desktop) build dir of prboom2, for the rdatawad tool
 # Optional:
 #   EXTRA_IWAD      a game WAD to bundle too (e.g. your doom.wad); it becomes the default
@@ -24,8 +26,8 @@ BT="$ANDROID_HOME/build-tools/35.0.0"
 ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
 API=31
 ABI=arm64-v8a
-VERSION_CODE="${VERSION_CODE:-15}"
-VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android15}"
+VERSION_CODE="${VERSION_CODE:-16}"
+VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android16}"
 TOOLCHAIN=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
            -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-$API -DCMAKE_BUILD_TYPE=Release)
 JOBS="$(nproc)"
@@ -80,6 +82,9 @@ if [ -n "${RT_DATA:-}" ]; then
 fi
 cp "$B/prboom/prboom-plus.wad" "$S/assets/"
 cp "$IWAD" "$S/assets/freedoom1.wad"
+if [ -n "${IWAD2:-}" ]; then
+    cp "$IWAD2" "$S/assets/freedoom2.wad"
+fi
 if [ -n "${EXTRA_IWAD:-}" ]; then
     # keep the WAD's own name (lowercase), the engine detects the game by it
     EXTRA_NAME="$(basename "$EXTRA_IWAD" | tr 'A-Z' 'a-z' | sed 's/^[0-9]*-//')"

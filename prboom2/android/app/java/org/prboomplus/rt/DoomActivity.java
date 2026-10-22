@@ -54,6 +54,19 @@ public class DoomActivity extends SDLActivity {
             iwad = new File(getFilesDir(), "freedoom1.wad").getAbsolutePath();
         }
         Log.i(LauncherActivity.TAG, "Using IWAD " + iwad);
-        return new String[] { "-iwad", iwad };
+        java.util.ArrayList<String> args = new java.util.ArrayList<>();
+        args.add("-iwad");
+        args.add(iwad);
+        String[] files = getIntent() != null ? getIntent().getStringArrayExtra("files") : null;
+        if (files != null && files.length > 0) {
+            args.add("-file");
+            java.util.Collections.addAll(args, files);
+        }
+        String[] deh = getIntent() != null ? getIntent().getStringArrayExtra("deh") : null;
+        if (deh != null && deh.length > 0) {
+            args.add("-deh");
+            java.util.Collections.addAll(args, deh);
+        }
+        return args.toArray(new String[0]);
     }
 }

@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Log;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -27,21 +28,22 @@ import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 
 /**
  * Starts before the game:
  * - extracts the bundled data (shaders, prboom-plus.wad, Freedoom) to internal
  *   storage once per install/update, as the engine reads plain files;
- * - imports a .wad the app was opened with ("Open with" from a file manager);
+ * - imports .wad / .deh / .zip files ("Open with" from a file manager, or
+ *   "Add file..."): game IWADs and mods (custom levels), see WadLibrary;
  * - if the previous run failed, shows its error and log so it can be copied;
- * then launches DoomActivity.
+ * - lets the player choose a game or mod, then launches DoomActivity.
  */
 public class LauncherActivity extends Activity {
 
     static final String TAG = "PrBoomRT";
     static final String PREFS = "prboomrt";
-    static final String PREF_IWAD = "iwad";
     private static final String PREF_DATA_STAMP = "data_stamp";
 
     // written by the engine (see SDL/i_main.c, lprintf.c) and by DoomActivity
@@ -51,9 +53,6 @@ public class LauncherActivity extends Activity {
     static final String RUNNING_FILE = "running.txt";
 
     private static final String BUNDLED_IWAD = "freedoom1.wad";
-    private static final String[] KNOWN_IWADS = {
-        "doom2.wad", "doom.wad", "doomu.wad", "plutonia.wad", "tnt.wad", "doom1.wad", "freedoom2.wad",
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,7 +66,11 @@ public class LauncherActivity extends Activity {
             writeFile(new File(home, JAVA_CRASH_FILE), "Can't extract game data:\n" + stackTrace(e));
         }
 
-        importWadFromIntent(home);
+        library = new WadLibrary(home);
+        if (savedInstanceState == null) {
+            // not again when the activity is recreated, e.g. on rotation
+            importFromIntent(getIntent());
+        }
 
         // "Show log" app shortcut (long-press the icon)
         if (ACTION_SHOW_LOG.equals(getIntent() != null ? getIntent().getAction() : null)) {
@@ -79,16 +82,124 @@ public class LauncherActivity extends Activity {
         if (report != null) {
             showReport(report, "The game stopped last time");
         } else {
-            startGame();
+            showPicker();
         }
     }
 
-    private void startGame() {
+    // --- game picker
+
+    private static final String PREF_LAST_GAME = "last_game";
+    private static final int REQUEST_ADD = 1;
+
+    private WadLibrary library;
+    private AlertDialog picker;
+
+    private void showPicker() {
         clearReport(getFilesDir());
+        final List<WadLibrary.Game> games = library.games(getExternalFilesDir(null));
+        if (games.isEmpty()) {
+            Toast.makeText(this, "No game data found", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+
+        // last played first
+        String last = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_LAST_GAME, null);
+        for (int i = 0; i < games.size(); i++) {
+            if (games.get(i).key().equals(last)) {
+                games.add(0, games.remove(i));
+                break;
+            }
+        }
+
+        String[] titles = new String[games.size()];
+        for (int i = 0; i < games.size(); i++) {
+            titles[i] = games.get(i).title;
+        }
+
+        if (picker != null) {
+            picker.dismiss();
+        }
+        picker = new AlertDialog.Builder(this)
+            .setTitle("Choose a game")
+            .setItems(titles, (d, which) -> startGame(games.get(which)))
+            .setNeutralButton("Add file\u2026", null)
+            .setNegativeButton("Quit", (d, w) -> finish())
+            .setCancelable(false)
+            .create();
+        picker.show();
+        picker.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(i, REQUEST_ADD);
+        });
+        ListView list = picker.getListView();
+        if (list != null) {
+            list.setOnItemLongClickListener((parent, view, pos, id) -> {
+                confirmRemove(games.get(pos));
+                return true;
+            });
+        }
+    }
+
+    private void confirmRemove(final WadLibrary.Game g) {
+        final File target = g.modDir != null ? new File(g.modDir) : new File(g.iwad);
+        boolean removable = g.modDir != null || target.getParentFile().equals(library.iwadDir());
+        if (!removable) {
+            Toast.makeText(this, "Built-in games can't be removed", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Remove " + g.title + "?")
+            .setPositiveButton("Remove", (d, w) -> {
+                deleteTree(target);
+                showPicker();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != REQUEST_ADD || result != RESULT_OK || data == null) {
+            return;
+        }
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                importUri(data.getClipData().getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) {
+            importUri(data.getData());
+        }
+        showPicker();
+    }
+
+    private void startGame(WadLibrary.Game g) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_LAST_GAME, g.key()).apply();
         Intent i = new Intent(this, DoomActivity.class);
-        i.putExtra("iwad", chooseIwad());
+        i.putExtra("iwad", g.iwad);
+        if (g.modDir != null) {
+            File dir = new File(g.modDir);
+            i.putExtra("files", paths(WadLibrary.modFiles(dir, ".wad")));
+            i.putExtra("deh", paths(WadLibrary.modFiles(dir, ".deh", ".bex")));
+        }
         startActivity(i);
         finish();
+    }
+
+    private static String[] paths(List<File> files) {
+        String[] out = new String[files.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = files.get(i).getAbsolutePath();
+        }
+        return out;
+    }
+
+    private void startGame() {
+        showPicker();
     }
 
     // --- error report
@@ -168,72 +279,29 @@ public class LauncherActivity extends Activity {
         new File(home, RUNNING_FILE).delete();
     }
 
-    // --- IWAD selection
+    // --- import ("Open with" from a file manager, or "Add file...")
 
-    private String chooseIwad() {
-        // 1. last imported WAD
-        String imported = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_IWAD, null);
-        if (imported != null && new File(imported).isFile()) {
-            return imported;
+    private void importFromIntent(Intent intent) {
+        Uri uri = intent != null ? intent.getData() : null;
+        if (uri != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
+            importUri(uri);
         }
-
-        // 2. a known IWAD in the app's external files folder
-        File ext = getExternalFilesDir(null);
-        if (ext != null) {
-            for (String name : KNOWN_IWADS) {
-                File f = new File(ext, name);
-                if (f.isFile()) {
-                    return f.getAbsolutePath();
-                }
-            }
-        }
-
-        // 3. a WAD bundled at build time (assets/default_iwad.txt names it)
-        String bundled = readFile(new File(getFilesDir(), "default_iwad.txt"), 256);
-        if (bundled != null) {
-            File f = new File(getFilesDir(), new File(bundled.trim()).getName());
-            if (!bundled.trim().isEmpty() && f.isFile()) {
-                return f.getAbsolutePath();
-            }
-        }
-
-        // 4. bundled Freedoom
-        return new File(getFilesDir(), BUNDLED_IWAD).getAbsolutePath();
     }
 
-    /** Copies a .wad the app was opened with into internal storage and selects it. */
-    private void importWadFromIntent(File home) {
-        Uri uri = getIntent() != null ? getIntent().getData() : null;
-        if (uri == null) {
-            return;
-        }
-
+    private void importUri(Uri uri) {
         String name = queryDisplayName(uri);
-        if (name == null || !name.toLowerCase(Locale.ROOT).endsWith(".wad")) {
-            name = "imported.wad";
-        }
-        // the engine detects some games by file name, e.g. tnt.wad / plutonia.wad
-        name = new File(name.toLowerCase(Locale.ROOT)).getName();
-
-        File dir = new File(home, "iwads");
-        File dst = new File(dir, name);
-        try {
-            if (!dir.isDirectory() && !dir.mkdirs()) {
-                throw new IOException("can't create " + dir);
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                throw new IOException("can't open " + uri);
             }
-            try (InputStream in = getContentResolver().openInputStream(uri);
-                 OutputStream out = new FileOutputStream(dst)) {
-                if (in == null) {
-                    throw new IOException("can't open " + uri);
-                }
-                copy(in, out);
+            WadLibrary.Imported r = library.importFile(in, name);
+            if (r.gameKey != null) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_LAST_GAME, r.gameKey).apply();
             }
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putString(PREF_IWAD, dst.getAbsolutePath()).apply();
-            Toast.makeText(this, "Using " + name, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, r.message, Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Log.e(TAG, "Can't import " + uri, e);
-            Toast.makeText(this, "Couldn't import " + name, Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Couldn't import " + (name != null ? name : "the file"), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -306,6 +374,20 @@ public class LauncherActivity extends Activity {
         while ((n = in.read(buf)) > 0) {
             out.write(buf, 0, n);
         }
+    }
+
+    static String readSmall(File f) {
+        return readFile(f, 4096);
+    }
+
+    static void deleteTree(File f) {
+        File[] children = f.listFiles();
+        if (children != null) {
+            for (File c : children) {
+                deleteTree(c);
+            }
+        }
+        f.delete();
     }
 
     static String stackTrace(Throwable t) {

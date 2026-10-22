@@ -14,10 +14,21 @@ If the GPU lacks something, the game stops at startup with a message naming it.
 
 ## Game data
 
-Freedoom: Phase 1 is bundled. To play original Doom, open your `doom.wad`
-(or `doom2.wad`, `plutonia.wad`, `tnt.wad`) with this app from a file
-manager ("Open with"); it is copied into the app and used from then on.
-WADs placed in `Android/data/org.prboomplus.rt/files/` are used too.
+The app starts with a game picker. Freedoom: Phase 1 and 2 are bundled. To
+add a game or a mod, tap **Add file...** in the picker, or open the file with
+this app from a file manager ("Open with"):
+
+- **Games (IWADs)**: `doom.wad`, `doom2.wad`, `plutonia.wad`, `tnt.wad`
+- **Custom levels and mods**: `.wad` (PWADs), DeHackEd patches (`.deh`,
+  `.bex`), or a `.zip` holding them
+
+Each mod is listed with the base game it runs on, picked from the levels it
+contains (Doom II levels use `doom2.wad` if added, otherwise Freedoom 2).
+Long-press an entry to remove it. WADs placed in
+`Android/data/org.prboomplus.rt/files/` are found too.
+
+The hand-placed ray tracing lights exist only for the original Doom maps;
+custom levels are lit from their own sector light levels.
 
 ## Touch controls
 
