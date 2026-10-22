@@ -502,8 +502,14 @@ default_t defaults[] =
   {"Ray tracing settings",{NULL},{0},UL,UL,def_none,ss_none},
   {"rt_dlss",{&rt_settings.dlss},{0},0,4,
    def_int,ss_none },
+#ifdef __ANDROID__
+  // phones: FSR performance mode (half resolution) by default
+  {"rt_fsr",{&rt_settings.fsr},{3},0,4,
+   def_int,ss_none },
+#else
   {"rt_fsr",{&rt_settings.fsr},{0},0,4,
    def_int,ss_none },
+#endif
   {"rt_renderscale",{&rt_settings.renderscale},{RT_SETTINGS_RENDERSCALE_720},0,RT_SETTINGS_RENDERSCALE_NUM-1,
    def_int,ss_none },
   {"rt_bloom_intensity",{&rt_settings.bloom_intensity},{2},0,3,
