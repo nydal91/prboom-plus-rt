@@ -77,8 +77,11 @@ check_include_file("asm/byteorder.h" HAVE_ASM_BYTEORDER_H)
 check_include_file("dirent.h" HAVE_DIRENT_H)
 
 option(BUILD_GL "Enable OpenGL rendering code" ON)
+# GLU tessellator + no-op GL from android/glshim instead of the system's
+# libGL/libGLU (always on Android; useful for portable desktop builds too)
+option(PRBOOM_GL_SHIM "Use android/glshim instead of system OpenGL" OFF)
 if(BUILD_GL)
-    if(ANDROID)
+    if(ANDROID OR PRBOOM_GL_SHIM)
         # No desktop OpenGL on Android. The RT renderer needs the GL renderer's
         # declarations and GLU's tessellator: android/glshim provides the
         # tessellator plus no-op GL entry points, android/include the headers.

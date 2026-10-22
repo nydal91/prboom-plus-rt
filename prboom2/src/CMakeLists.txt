@@ -457,6 +457,13 @@ function(AddGameExecutable TARGET SOURCES)
             IMPORTED_LOCATION       "${RTGL1_ANDROID_LIBRARY}"
         )
         target_compile_definitions(${TARGET} PRIVATE RG_USE_SURFACE_ANDROID ZLIB_CONST)
+    elseif(UNIX AND DEFINED RTGL1_LIBRARY)
+        # explicit library, e.g. for a portable build
+        set_target_properties(RayTracedGL1 PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "$ENV{RTGL1_SDK_PATH}/Include"
+            IMPORTED_LOCATION       "${RTGL1_LIBRARY}"
+        )
+        target_compile_definitions(${TARGET} PRIVATE RG_USE_SURFACE_XLIB ZLIB_CONST)
     elseif(UNIX)
         set_target_properties(RayTracedGL1 PROPERTIES
             INTERFACE_INCLUDE_DIRECTORIES "$ENV{RTGL1_SDK_PATH}/Include"
