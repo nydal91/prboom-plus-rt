@@ -36,6 +36,7 @@
  *-----------------------------------------------------------------------------*/
 
 #ifdef HAVE_CONFIG_H
+#include "SDL/i_gamepad.h"
 #include "config.h"
 #endif
 
@@ -4021,6 +4022,7 @@ typedef enum
   gfxset_muzzleflash,
   gfxset_classicflashlight,
   gfxset_showfps,
+  gfxset_rumble,
   gfxset_hudstyle,
 #if RT_SEPARATE_HUD_SCALE
   gfxset_statusbarscale,
@@ -4029,6 +4031,12 @@ typedef enum
   gfxset_hudsize,
   gfxset_end
 } gfxset_e;
+// a short buzz when rumble is switched on, so it can be felt
+static void M_RumbleTest(void)
+{
+  I_Gamepad_Rumble(0.6f, 0.6f, 250);
+}
+
 setup_menu_t RT_GraphicsSettings[] =
 {
   {"Video mode",  S_CHOICE, m_null, RT_X, RT_Y + 0 * 8, {"videomode"}, 0, 0, M_ChangeVideoMode, RT_simpler_videomodes},
@@ -4051,13 +4059,14 @@ setup_menu_t RT_GraphicsSettings[] =
   {"Muzzle flash",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+3) * 8, {"rt_muzzleflash_intensity"}, 0, 0, NULL, RT_options_muzzleflash_intensity },
   {"Flashlight",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+4) * 8, {"rt_classic_flashlight"}, 0, 0, NULL, RT_options_classic_flashlight },
   {"Show FPS",    S_YESNO,   m_null, RT_X, RT_Y + (RT_U+5) * 8, {"show_fps"}},
+  {"Controller rumble", S_YESNO, m_null, RT_X, RT_Y + (RT_U+6) * 8, {"gamepad_rumble"}, 0, 0, M_RumbleTest},
 
-  {"HUD style",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+6) * 8, {"rt_hud_style"}, 0, 0, M_RT_ApplyHUD, RT_options_hud_style},
+  {"HUD style",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+7) * 8, {"rt_hud_style"}, 0, 0, M_RT_ApplyHUD, RT_options_hud_style},
 #if RT_SEPARATE_HUD_SCALE
-  {"Classic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+7) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
-  {"Minimalistic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+8) * 8, {"rt_hud_scale"}, 0, 0, NULL, RT_options_hud_scale },
+  {"Classic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+8) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
+  {"Minimalistic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+9) * 8, {"rt_hud_scale"}, 0, 0, NULL, RT_options_hud_scale },
 #else
-  {"HUD size",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+7) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
+  {"HUD size",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+8) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
 #endif
 
   {0,S_SKIP | S_END,m_null}

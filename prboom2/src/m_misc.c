@@ -34,6 +34,7 @@
  *-----------------------------------------------------------------------------*/
 
 #ifdef HAVE_CONFIG_H
+#include "SDL/i_gamepad.h"
 #include "config.h"
 #endif
 
@@ -524,6 +525,8 @@ default_t defaults[] =
   {"rt_muzzleflash_intensity",{&rt_settings.muzzleflash_intensity},{1},0,1,
    def_int,ss_none},
   {"show_fps",{&show_fps},{0},0,1,
+   def_bool,ss_none},
+  {"gamepad_rumble",{&gamepad_rumble},{1},0,1,
    def_bool,ss_none},
   {"rt_statusbar_scale",{&rt_settings.statusbar_scale},{5},0,9,
    def_int,ss_none},

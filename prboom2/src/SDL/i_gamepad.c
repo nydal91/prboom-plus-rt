@@ -32,6 +32,12 @@
 static SDL_GameController *pads[MAX_PADS];
 #ifdef PRBOOM_TOUCH_TEST
 static SDL_Joystick *test_pad;
+static int SDLCALL TestRumble(void *userdata, Uint16 low, Uint16 high)
+{
+  if (low || high)
+    lprintf(LO_INFO, "padtest: rumble %u %u\n", low, high);
+  return 0;
+}
 #endif
 
 // keys held by buttons, so they can be released on the right tic
@@ -144,6 +150,7 @@ void I_Gamepad_Init(void)
     desc.naxes = SDL_CONTROLLER_AXIS_MAX;
     desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
     desc.name = "Test pad";
+    desc.Rumble = TestRumble;
     test_pad = SDL_JoystickOpen(SDL_JoystickAttachVirtualEx(&desc));
   }
 #endif
@@ -441,4 +448,26 @@ void I_Gamepad_GetMove(int *forward, int *side, int *turn)
   *side = (int)(lx * MOVE_SIDE);
   // finer control near the center
   *turn = (int)(rx * fabsf(rx) * TURN_PER_TIC);
+}
+
+int gamepad_rumble = 1;
+
+void I_Gamepad_Rumble(float low, float high, int ms)
+{
+  int i;
+  Uint16 lo, hi;
+
+  if (!gamepad_rumble || demoplayback)
+  {
+    return;
+  }
+  lo = (Uint16)(BETWEEN(0.0f, 1.0f, low) * 65535.0f);
+  hi = (Uint16)(BETWEEN(0.0f, 1.0f, high) * 65535.0f);
+  for (i = 0; i < MAX_PADS; i++)
+  {
+    if (pads[i])
+    {
+      SDL_GameControllerRumble(pads[i], lo, hi, (Uint32)ms);
+    }
+  }
 }

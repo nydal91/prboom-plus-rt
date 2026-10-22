@@ -53,6 +53,9 @@ are connected:
 | Start | menu | | |
 | View / Back | automap | | |
 
+The controller rumbles when you fire and when you take damage; turn it off
+with "Controller rumble" in Options → Display Options.
+
 ## Known limitations
 
 - Switching away from the app pauses the game; the renderer rebuilds its

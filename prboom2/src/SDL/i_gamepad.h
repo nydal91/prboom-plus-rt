@@ -27,4 +27,9 @@ void I_Gamepad_Tic(void);
 // Analog movement and turning for the next ticcmd
 void I_Gamepad_GetMove(int *forward, int *side, int *turn);
 
+// Rumble: motor strengths 0..1 (low = heavy, high = light), duration in ms.
+// Does nothing when "Controller rumble" is off or no controller can rumble.
+extern int gamepad_rumble;
+void I_Gamepad_Rumble(float low, float high, int ms);
+
 #endif

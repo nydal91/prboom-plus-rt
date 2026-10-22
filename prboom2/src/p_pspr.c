@@ -32,6 +32,7 @@
  *
  *-----------------------------------------------------------------------------*/
 
+#include "SDL/i_gamepad.h"
 #include "doomstat.h"
 #include "r_main.h"
 #include "p_map.h"
@@ -523,8 +524,18 @@ void A_GunFlash(player_t *player, pspdef_t *psp)
 // A_Punch
 //
 
+// controller rumble for the local player's weapons
+static void WeaponRumble(player_t *player, float low, float high, int ms)
+{
+  if (player == &players[consoleplayer])
+  {
+    I_Gamepad_Rumble(low, high, ms);
+  }
+}
+
 void A_Punch(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.45f, 0.20f, 90);
   angle_t angle;
   int t, slope, damage;
 
@@ -567,6 +578,7 @@ void A_Punch(player_t *player, pspdef_t *psp)
 
 void A_Saw(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.35f, 0.60f, 150);
   int slope, damage;
   angle_t angle;
   int t;
@@ -622,6 +634,7 @@ void A_Saw(player_t *player, pspdef_t *psp)
 
 void A_FireMissile(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.75f, 0.50f, 220);
   CHECK_WEAPON_CODEPOINTER("A_FireMissile", player);
 
   player->ammo[weaponinfo[player->readyweapon].ammo]--;
@@ -634,6 +647,7 @@ void A_FireMissile(player_t *player, pspdef_t *psp)
 
 void A_FireBFG(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 1.00f, 1.00f, 450);
   CHECK_WEAPON_CODEPOINTER("A_FireBFG", player);
 
   player->ammo[weaponinfo[player->readyweapon].ammo] -= BFGCELLS;
@@ -652,6 +666,7 @@ void A_FireBFG(player_t *player, pspdef_t *psp)
 int autoaim = 0;  // killough 7/19/98: autoaiming was not in original beta
 void A_FireOldBFG(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.30f, 0.40f, 70);
   int type = MT_PLASMA1;
 
   if (compatibility_level < mbf_compatibility)
@@ -712,6 +727,7 @@ void A_FireOldBFG(player_t *player, pspdef_t *psp)
 
 void A_FirePlasma(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.15f, 0.40f, 60);
   CHECK_WEAPON_CODEPOINTER("A_FirePlasma", player);
 
   player->ammo[weaponinfo[player->readyweapon].ammo]--;
@@ -776,6 +792,7 @@ static void P_GunShot(mobj_t *mo, dboolean accurate)
 
 void A_FirePistol(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.25f, 0.45f, 90);
   CHECK_WEAPON_CODEPOINTER("A_FirePistol", player);
 
   S_StartSound(player->mo, sfx_pistol);
@@ -794,6 +811,7 @@ void A_FirePistol(player_t *player, pspdef_t *psp)
 
 void A_FireShotgun(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.65f, 0.80f, 170);
   int i;
 
   CHECK_WEAPON_CODEPOINTER("A_FireShotgun", player);
@@ -817,6 +835,7 @@ void A_FireShotgun(player_t *player, pspdef_t *psp)
 
 void A_FireShotgun2(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.95f, 1.00f, 240);
   int i;
 
   CHECK_WEAPON_CODEPOINTER("A_FireShotgun2", player);
@@ -848,6 +867,7 @@ void A_FireShotgun2(player_t *player, pspdef_t *psp)
 
 void A_FireCGun(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.30f, 0.50f, 75);
   CHECK_WEAPON_CODEPOINTER("A_FireCGun", player);
 
   if (player->ammo[weaponinfo[player->readyweapon].ammo] || default_comp[comp_sound])
@@ -940,6 +960,7 @@ void A_BFGSpray(mobj_t *mo)
 
 void A_BFGsound(player_t *player, pspdef_t *psp)
 {
+  WeaponRumble(player, 0.25f, 0.15f, 600);
   CHECK_WEAPON_CODEPOINTER("A_BFGsound", player);
 
   S_StartSound(player->mo, sfx_bfg);
