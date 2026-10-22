@@ -37,6 +37,9 @@
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
+#ifdef __ANDROID__
+#include "ANDROID/android_touch.h"
+#endif
 #endif
 
 #include "SDL_timer.h"
@@ -447,6 +450,9 @@ void D_Display (fixed_t frac)
 
   if (V_GetMode() == VID_MODERT)
   {
+#ifdef __ANDROID__
+    AndroidTouch_Draw();
+#endif
     RT_EndFrame();
   }
 

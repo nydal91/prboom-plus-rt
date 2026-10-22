@@ -1,0 +1,31 @@
+#ifndef __ANDROID_TOUCH__
+#define __ANDROID_TOUCH__
+
+#ifdef __ANDROID__
+
+#include <SDL.h>
+#include "doomtype.h"
+
+// Touch controls for phones:
+//
+//  +--------+--------+--------+--------+--------+
+//  |  MENU  |  MAP   | ENTER  | PREV W | NEXT W |   top 18%: buttons
+//  +--------+--------+--------+--------+--------+
+//  |                    |                 | USE |
+//  |  move stick        |  drag to turn   +-----+
+//  |  (left 40%)        |                 |FIRE |
+//  +--------------------+-----------------+-----+
+//
+// The Android back button opens the menu.
+
+void AndroidTouch_Init(void);
+// Returns true if the event was consumed
+dboolean AndroidTouch_HandleEvent(const SDL_Event *ev);
+// Called once per tic, posts movement keys and turning
+void AndroidTouch_Tic(void);
+// Draws the control outlines over the frame
+void AndroidTouch_Draw(void);
+
+#endif // __ANDROID__
+
+#endif

@@ -36,6 +36,7 @@
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
+#include <SDL.h>
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -623,6 +624,20 @@ int main(int argc, char **argv)
       fprintf(stderr, "Failed to revoke setuid\n");
     else
       fprintf(stderr, "Revoked uid %d\n",stored_euid);
+#endif
+
+#ifdef __ANDROID__
+  // The Java activity extracts the game data to the app's internal storage
+  // and points HOME there; config and saves go to $HOME/.prboom-plus.
+  {
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+    {
+      home = SDL_AndroidGetInternalStoragePath();
+      setenv("HOME", home, 1);
+    }
+    chdir(home);
+  }
 #endif
 
   myargc = argc;

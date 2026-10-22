@@ -51,6 +51,9 @@
 
 #include <SDL.h>
 #include <SDL_syswm.h>
+#ifdef __ANDROID__
+#include "ANDROID/android_touch.h"
+#endif
 
 #include "m_argv.h"
 #include "doomstat.h"
@@ -241,6 +244,18 @@ static void I_GetEvent(void)
 
 while (SDL_PollEvent(Event))
 {
+#ifdef __ANDROID__
+  if (AndroidTouch_HandleEvent(Event))
+  {
+    continue;
+  }
+  // The window surface is destroyed when the app goes to the background,
+  // and the ray tracing swapchain can't survive that: quit cleanly instead.
+  if (Event->type == SDL_APP_WILLENTERBACKGROUND || Event->type == SDL_APP_TERMINATING)
+  {
+    I_SafeExit(0);
+  }
+#endif
   switch (Event->type) {
   case SDL_KEYDOWN:
 #ifdef MACOSX
@@ -372,6 +387,9 @@ while (SDL_PollEvent(Event))
 
 void I_StartTic (void)
 {
+#ifdef __ANDROID__
+  AndroidTouch_Tic();
+#endif
   I_GetEvent();
 
   I_ReadMouse();
@@ -616,6 +634,9 @@ void I_PreInitGraphics(void)
 
   // Initialize SDL
   unsigned int flags = 0;
+#ifdef __ANDROID__
+  AndroidTouch_Init(); // sets hints, must be before SDL_Init
+#endif
   if (!(M_CheckParm("-nodraw") && M_CheckParm("-nosound")))
     flags = SDL_INIT_VIDEO;
 #ifdef PRBOOM_DEBUG
@@ -1309,6 +1330,10 @@ void I_UpdateVideoMode(void)
   }
   else if (V_GetMode() == VID_MODERT)
   {
+    init_flags |= SDL_WINDOW_VULKAN;
+#ifdef __ANDROID__
+    init_flags |= SDL_WINDOW_FULLSCREEN;
+#endif
     sdl_window = SDL_CreateWindow(
         PACKAGE_NAME " " PACKAGE_VERSION,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,

@@ -184,4 +184,6 @@ typedef struct setup_menu_s
   const char **selectstrings; /* list of strings for choice value */
 } setup_menu_t;
 
+dboolean RT_IsClassicHUDEnabled(void); // defined in m_menu.c
+
 #endif

@@ -64,6 +64,11 @@ void RT_Init()
     .hinstance = wmInfo.info.win.hinstance,
     .hwnd = wmInfo.info.win.window
   };
+#elif defined(__ANDROID__)
+  RgAndroidSurfaceCreateInfo androidInfo =
+  {
+    .window = wmInfo.info.android.window
+  };
 #else
   RgXlibSurfaceCreateInfo x11Info =
   {
@@ -79,6 +84,8 @@ void RT_Init()
 
   #if WIN32
     .pWin32SurfaceInfo = &win32Info,
+  #elif defined(__ANDROID__)
+    .pAndroidSurfaceCreateInfo = &androidInfo,
   #else
     .pXlibSurfaceCreateInfo = &x11Info,
   #endif

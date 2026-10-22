@@ -78,10 +78,28 @@ check_include_file("dirent.h" HAVE_DIRENT_H)
 
 option(BUILD_GL "Enable OpenGL rendering code" ON)
 if(BUILD_GL)
-    find_package(OpenGL)
+    if(ANDROID)
+        # No desktop OpenGL on Android. The RT renderer needs the GL renderer's
+        # declarations and GLU's tessellator: android/glshim provides the
+        # tessellator plus no-op GL entry points, android/include the headers.
+        add_subdirectory(android/glshim)
+        include_directories(${CMAKE_CURRENT_SOURCE_DIR}/android/include)
+        set(OPENGL_FOUND TRUE)
+        set(OPENGL_GLU_FOUND TRUE)
+        set(OPENGL_gl_LIBRARY glshim)
+        set(OPENGL_glu_LIBRARY "")
+    else()
+        find_package(OpenGL)
+    endif()
 endif()
 
-if(WIN32)
+if(ANDROID)
+    # SDL2 built separately with the NDK: pass -DSDL2_ANDROID_SOURCE_DIR and -DSDL2_ANDROID_LIBRARY
+    set( SDL2_INCLUDE_DIR "${SDL2_ANDROID_SOURCE_DIR}/include" )
+    set( SDL2_INCLUDE_DIRS "${SDL2_INCLUDE_DIR}" )
+    set( SDL2_LIBRARIES "${SDL2_ANDROID_LIBRARY}" )
+    set( SDL2_FOUND TRUE )
+elseif(WIN32)
     set( SDL2_LIBRARIES "${PRBOOM_EXTERNAL_FOLDER_PATH}/SDL2/SDL2.lib" )
     set( SDL2_INCLUDE_DIR "${PRBOOM_EXTERNAL_FOLDER_PATH}/SDL2/include" )
     set( SDL2_INCLUDE_DIRS "${SDL2_INCLUDE_DIR}" )
