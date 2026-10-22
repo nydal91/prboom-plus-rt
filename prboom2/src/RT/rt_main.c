@@ -46,9 +46,13 @@ rtmain_t rtmain = { 0 };
 static RgBool32 frame_started_guard = 0;
 
 
+// last message from RTGL1, to explain an init failure in the error dialog
+static char rt_last_message[512];
+
 static void RT_Print(const char *pMessage, void *pUserData)
 {
   lprintf(LO_ERROR, "%s\n", pMessage);
+  snprintf(rt_last_message, sizeof(rt_last_message), "%s", pMessage);
 }
 
 
@@ -131,7 +135,7 @@ void RT_Init()
   RgResult r = rgCreateInstance(&info, &rtmain.instance);
   if (r != RG_SUCCESS)
   {
-    I_Error("Can't initialize ray tracing engine: %s", rgGetResultDescription(r));
+    I_Error("Can't initialize ray tracing engine: %s\n\n%s", rgGetResultDescription(r), rt_last_message);
     return;
   }
 
