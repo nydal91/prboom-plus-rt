@@ -1,7 +1,8 @@
 #ifndef __ANDROID_TOUCH__
 #define __ANDROID_TOUCH__
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(PRBOOM_TOUCH_CONTROLS)
+#define HAVE_TOUCH_CONTROLS 1
 
 #include <SDL.h>
 #include "doomtype.h"
@@ -26,6 +27,6 @@ void AndroidTouch_Tic(void);
 // Draws the control outlines over the frame
 void AndroidTouch_Draw(void);
 
-#endif // __ANDROID__
+#endif // HAVE_TOUCH_CONTROLS
 
 #endif

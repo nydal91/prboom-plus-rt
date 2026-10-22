@@ -51,9 +51,7 @@
 
 #include <SDL.h>
 #include <SDL_syswm.h>
-#ifdef __ANDROID__
 #include "ANDROID/android_touch.h"
-#endif
 
 #include "m_argv.h"
 #include "doomstat.h"
@@ -244,21 +242,31 @@ static void I_GetEvent(void)
 
 while (SDL_PollEvent(Event))
 {
-#ifdef __ANDROID__
+#ifdef HAVE_TOUCH_CONTROLS
   if (AndroidTouch_HandleEvent(Event))
   {
     continue;
   }
+#endif
+#ifdef __ANDROID__
   // Android destroys the window's surface in the background and makes a new
   // one on return; SDL blocks this loop while paused. RT swaps the surface
   // at the start of the next frame.
   switch (Event->type)
   {
     case SDL_APP_WILLENTERBACKGROUND: lprintf(LO_INFO, "Android: entering background\n"); break;
-    case SDL_APP_DIDENTERBACKGROUND:  lprintf(LO_INFO, "Android: in background\n"); break;
+    case SDL_APP_DIDENTERBACKGROUND:
+      lprintf(LO_INFO, "Android: in background\n");
+      // Android may kill a backgrounded app; that isn't a crash
+      remove("running.txt");
+      break;
     case SDL_APP_WILLENTERFOREGROUND: lprintf(LO_INFO, "Android: entering foreground\n"); break;
     case SDL_APP_DIDENTERFOREGROUND:
       lprintf(LO_INFO, "Android: in foreground, recreating the surface\n");
+      {
+        FILE *f = fopen("running.txt", "w");
+        if (f) { fputs("running\n", f); fclose(f); }
+      }
       if (V_GetMode() == VID_MODERT)
       {
         RT_OnAndroidWindowChanged();
@@ -404,7 +412,7 @@ while (SDL_PollEvent(Event))
 
 void I_StartTic (void)
 {
-#ifdef __ANDROID__
+#ifdef HAVE_TOUCH_CONTROLS
   AndroidTouch_Tic();
 #endif
   I_GetEvent();
@@ -651,7 +659,7 @@ void I_PreInitGraphics(void)
 
   // Initialize SDL
   unsigned int flags = 0;
-#ifdef __ANDROID__
+#ifdef HAVE_TOUCH_CONTROLS
   AndroidTouch_Init(); // sets hints, must be before SDL_Init
 #endif
   if (!(M_CheckParm("-nodraw") && M_CheckParm("-nosound")))

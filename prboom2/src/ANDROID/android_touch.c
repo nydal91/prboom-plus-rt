@@ -1,8 +1,8 @@
 // Touch controls for the Android build, see android_touch.h for the layout.
 
-#ifdef __ANDROID__
-
 #include "android_touch.h"
+
+#ifdef HAVE_TOUCH_CONTROLS
 
 #include <math.h>
 #include <string.h>
@@ -13,6 +13,7 @@
 #include "d_main.h"
 #include "g_game.h"
 #include "v_video.h"
+#include "lprintf.h"
 
 // zones, in normalized screen coordinates
 #define TOP_BAR_H       0.18f
@@ -25,7 +26,7 @@
 #define STICK_RUN       0.12f
 
 // turning speed: mouse units per screen width of drag
-#define TURN_SCALE      2600.0f
+#define TURN_SCALE      20000.0f
 
 #define MAX_FINGERS     10
 
@@ -45,7 +46,26 @@ typedef struct
   float x, y;     // current position
   int key;        // ROLE_KEY: held key (0 = none)
   int key2;       // optional second key, e.g. enter in menus
+  int down_tic;   // touch_tic when the key went down
+  Uint32 down_ms;
 } finger_t;
+
+// Released buttons stay pressed until the game has built at least one tic
+// with them down (and for a minimum time): at low frame rates a quick tap's
+// down and up arrive in the same frame and would cancel out.
+#define MIN_PRESS_MS 100
+#define MAX_RELEASES 16
+
+typedef struct
+{
+  int key, key2;
+  int earliest_tic;
+  Uint32 earliest_ms;
+} release_t;
+
+static release_t releases[MAX_RELEASES];
+static int release_count = 0;
+static int touch_tic = 0;
 
 static finger_t fingers[MAX_FINGERS];
 static float pending_turn = 0.0f;
@@ -61,6 +81,8 @@ static void PostKey(int key, dboolean down)
   {
     return;
   }
+
+  lprintf(LO_INFO, "touch: key %d %s\n", key, down ? "down" : "up");
 
   memset(&ev, 0, sizeof(ev));
   ev.type = down ? ev_keydown : ev_keyup;
@@ -173,6 +195,8 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
 
       if (f->role == ROLE_KEY)
       {
+        f->down_tic = touch_tic;
+        f->down_ms = SDL_GetTicks();
         PostKey(f->key, true);
         PostKey(f->key2, true);
       }
@@ -203,8 +227,19 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
       {
         if (f->role == ROLE_KEY)
         {
-          PostKey(f->key, false);
-          PostKey(f->key2, false);
+          if (release_count < MAX_RELEASES)
+          {
+            release_t *r = &releases[release_count++];
+            r->key = f->key;
+            r->key2 = f->key2;
+            r->earliest_tic = f->down_tic + 1;
+            r->earliest_ms = f->down_ms + MIN_PRESS_MS;
+          }
+          else
+          {
+            PostKey(f->key, false);
+            PostKey(f->key2, false);
+          }
         }
         f->role = ROLE_NONE;
       }
@@ -235,7 +270,28 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
 
 void AndroidTouch_Tic(void)
 {
+#ifdef PRBOOM_TOUCH_TEST
+  void AndroidTouch_TestInject(void);
+  AndroidTouch_TestInject();
+#endif
   float dx = 0, dy = 0;
+
+  touch_tic++;
+
+  // delayed button releases, see MIN_PRESS_MS
+  for (int i = 0; i < release_count; )
+  {
+    if (touch_tic > releases[i].earliest_tic && SDL_TICKS_PASSED(SDL_GetTicks(), releases[i].earliest_ms))
+    {
+      PostKey(releases[i].key, false);
+      PostKey(releases[i].key2, false);
+      releases[i] = releases[--release_count];
+    }
+    else
+    {
+      i++;
+    }
+  }
   dboolean stick = false;
 
   for (int i = 0; i < MAX_FINGERS; i++)
@@ -321,4 +377,65 @@ void AndroidTouch_Draw(void)
   }
 }
 
-#endif // __ANDROID__
+
+#ifdef PRBOOM_TOUCH_TEST
+// Desktop test: PRBOOM_TOUCH_SCRIPT="tic,d|m|u,fingerid,x,y;..." pushes SDL finger
+// events through SDL's queue at the given game tics, like Android would.
+#include "d_player.h"
+#include "doomstat.h"
+
+void AndroidTouch_TestInject(void)
+{
+  static int last_tic = -1;
+  static unsigned char done[256];
+  const char *script = getenv("PRBOOM_TOUCH_SCRIPT");
+  const char *p = script;
+  int index = 0;
+
+  if (!script || gametic == last_tic)
+  {
+    return;
+  }
+  last_tic = gametic;
+
+  for (; p && *p; index++)
+  {
+    int tic, id; char t; float x, y;
+    if (sscanf(p, "%d,%c,%d,%f,%f", &tic, &t, &id, &x, &y) == 5 && tic <= gametic
+        && index < (int)sizeof(done) && !done[index])
+    {
+      done[index] = 1;
+      SDL_Event e;
+      memset(&e, 0, sizeof(e));
+      e.type = t == 'd' ? SDL_FINGERDOWN : t == 'u' ? SDL_FINGERUP : SDL_FINGERMOTION;
+      static float last_x[16], last_y[16];
+      e.tfinger.fingerId = id;
+      e.tfinger.x = x;
+      e.tfinger.y = y;
+      if (id >= 0 && id < 16)
+      {
+        e.tfinger.dx = t == 'd' ? 0 : x - last_x[id];
+        e.tfinger.dy = t == 'd' ? 0 : y - last_y[id];
+        last_x[id] = x;
+        last_y[id] = y;
+      }
+      SDL_PushEvent(&e);
+      lprintf(LO_INFO, "touchtest: tic %d push %c finger %d at %.2f,%.2f\n", gametic, t, id, x, y);
+    }
+    p = strchr(p, ';');
+    if (p) p++;
+  }
+
+  static int last_log = -100;
+  if (gamestate == GS_LEVEL && gametic - last_log >= 35)
+  {
+    last_log = gametic;
+    player_t *pl = &players[consoleplayer];
+    lprintf(LO_INFO, "touchtest: tic %d ammo %d pos %d,%d angle %u\n", gametic,
+            pl->ammo[am_clip], pl->mo ? pl->mo->x >> 16 : 0, pl->mo ? pl->mo->y >> 16 : 0,
+            pl->mo ? (unsigned)(pl->mo->angle >> 24) : 0);
+  }
+}
+#endif
+
+#endif // HAVE_TOUCH_CONTROLS

@@ -519,10 +519,14 @@ static void I_SetAffinityMask(void)
 {
   // Forcing single core only for "SDL MIDI Player"
   process_affinity_mask = 0;
+#ifndef __ANDROID__
+  // Not on Android: there's no SDL_mixer, and pinning the game, audio and GPU
+  // driver threads to core 0 (often a slow efficiency core) made sound stutter
   if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
   {
     process_affinity_mask = 1;
   }
+#endif
 
   // Set the process affinity mask so that all threads
   // run on the same processor.  This is a workaround for a bug in 

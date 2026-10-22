@@ -20,8 +20,8 @@ BT="$ANDROID_HOME/build-tools/35.0.0"
 ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
 API=31
 ABI=arm64-v8a
-VERSION_CODE="${VERSION_CODE:-4}"
-VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android4}"
+VERSION_CODE="${VERSION_CODE:-5}"
+VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android5}"
 TOOLCHAIN=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
            -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-$API -DCMAKE_BUILD_TYPE=Release)
 JOBS="$(nproc)"

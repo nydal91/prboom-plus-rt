@@ -345,10 +345,11 @@ function(AddGameExecutable TARGET SOURCES)
         # GLU tessellator callbacks are passed as void(*)(void), as GLU requires;
         # newer Clang makes that an error by default
         target_compile_options(${TARGET} PRIVATE -Wno-error=incompatible-function-pointer-types)
-        target_sources(${TARGET} PRIVATE ANDROID/android_touch.c)
     else()
         add_executable(${TARGET} WIN32 ${SOURCES})
     endif()
+    # touch controls: compiled in on Android, or with -DPRBOOM_TOUCH_CONTROLS
+    target_sources(${TARGET} PRIVATE ANDROID/android_touch.c)
     target_include_directories(${TARGET} PRIVATE
         ${SDL2_INCLUDE_DIRS}
         ${CMAKE_BINARY_DIR}

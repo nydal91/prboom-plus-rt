@@ -433,7 +433,12 @@ default_t defaults[] =
    def_int,ss_none}, // select music driver (DOS), -1 is autodetect, 0 is none"; in Linux, non-zero enables music
   {"pitched_sounds",{&pitched_sounds},{1},0,1, // killough 2/21/98
    def_bool,ss_none}, // enables variable pitch in sound effects (from id's original code)
+#ifdef __ANDROID__
+  // phones mix at 48 kHz: avoids SDL resampling
+  {"samplerate",{&snd_samplerate},{48000},11025,48000, def_int,ss_none},
+#else
   {"samplerate",{&snd_samplerate},{44100},11025,48000, def_int,ss_none},
+#endif
   {"slice_samplecount",{&snd_samplecount},{512},32,8192, def_int,ss_none},
   {"sfx_volume",{&snd_SfxVolume},{8},0,15, def_int,ss_none},
   {"music_volume",{&snd_MusicVolume},{8},0,15, def_int,ss_none},
