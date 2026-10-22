@@ -31,8 +31,10 @@ WADs placed in `Android/data/org.prboomplus.rt/files/` are used too.
 +--------------------+-----------------+-----+
 ```
 
-The stick runs when pushed far. Back opens the menu. In menus, move with
-the stick and confirm with ENTER or USE. Bluetooth keyboards and gamepads
+The stick runs when pushed far. Back opens the menu. In menus, tap an item
+to choose it, or drag anywhere to move the cursor (hold to repeat); on the
+settings screens the first tap highlights a row and a second tap changes it,
+then drag left/right to pick a value and tap to confirm. Bluetooth keyboards and gamepads
 work through SDL.
 
 ## Known limitations

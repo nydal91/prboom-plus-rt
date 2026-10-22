@@ -67,6 +67,9 @@ void M_Init (void);
 
 void M_StartControlPanel (void);
 
+// touch screens: tap on a menu item, see m_menu.c
+int M_TouchTap(float nx, float ny);
+
 void M_ForcedLoadGame(const char *msg); // killough 5/15/98: forced loadgames
 
 void M_Trans(void);          // killough 11/98: reset translucency

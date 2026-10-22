@@ -14,6 +14,7 @@
 #include "g_game.h"
 #include "v_video.h"
 #include "lprintf.h"
+#include "m_menu.h"
 
 // zones, in normalized screen coordinates
 #define TOP_BAR_H       0.18f
@@ -36,7 +37,14 @@ typedef enum
   ROLE_STICK,
   ROLE_LOOK,
   ROLE_KEY,
+  ROLE_MENU,      // in a menu: a tap on an item, or a drag (becomes ROLE_STICK)
 } role_t;
+
+// menus: drag distance that turns a tap into the stick, and arrow key repeat
+#define MENU_DRAG       0.04f
+#define MENU_STICK      0.05f
+#define MENU_REPEAT1_MS 400
+#define MENU_REPEAT_MS  160
 
 typedef struct
 {
@@ -96,6 +104,33 @@ static void SetHeld(dboolean *held, int key, dboolean want)
   {
     PostKey(key, want);
     *held = want;
+  }
+}
+
+static void QueueRelease(int key, int key2, Uint32 down_ms)
+{
+  if (release_count < MAX_RELEASES)
+  {
+    release_t *r = &releases[release_count++];
+    r->key = key;
+    r->key2 = key2;
+    r->earliest_tic = touch_tic + 1;
+    r->earliest_ms = down_ms + MIN_PRESS_MS;
+  }
+  else
+  {
+    PostKey(key, false);
+    PostKey(key2, false);
+  }
+}
+
+// a short press: down now, up after the game has seen it
+static void PressKey(int key)
+{
+  if (key > 0)
+  {
+    PostKey(key, true);
+    QueueRelease(key, 0, SDL_GetTicks());
   }
 }
 
@@ -171,6 +206,11 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
         f->role = ROLE_KEY;
         TopBarKeys(x, &f->key, &f->key2);
       }
+      else if (menuactive && x < SIDE_BTN_X)
+      {
+        // decided when the finger moves or lifts
+        f->role = ROLE_MENU;
+      }
       else if (x < STICK_W)
       {
         f->role = ROLE_STICK;
@@ -195,7 +235,7 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
 
       {
         static int logged = 0;
-        static const char *names[] = { "none", "stick", "look", "button" };
+        static const char *names[] = { "none", "stick", "look", "button", "menu" };
         if (logged < 200)
         {
           logged++;
@@ -225,6 +265,10 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
         }
         f->x = ev->tfinger.x;
         f->y = ev->tfinger.y;
+        if (f->role == ROLE_MENU && fabsf(f->x - f->x0) + fabsf(f->y - f->y0) > MENU_DRAG)
+        {
+          f->role = ROLE_STICK;
+        }
       }
       return true;
     }
@@ -237,19 +281,13 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
       {
         if (f->role == ROLE_KEY)
         {
-          if (release_count < MAX_RELEASES)
-          {
-            release_t *r = &releases[release_count++];
-            r->key = f->key;
-            r->key2 = f->key2;
-            r->earliest_tic = f->down_tic + 1;
-            r->earliest_ms = f->down_ms + MIN_PRESS_MS;
-          }
-          else
-          {
-            PostKey(f->key, false);
-            PostKey(f->key2, false);
-          }
+          QueueRelease(f->key, f->key2, f->down_ms);
+        }
+        else if (f->role == ROLE_MENU)
+        {
+          int key = M_TouchTap(f->x0, f->y0);
+          lprintf(LO_INFO, "touch: menu tap %.2f,%.2f -> %d\n", f->x0, f->y0, key);
+          PressKey(key);
         }
         f->role = ROLE_NONE;
       }
@@ -316,11 +354,48 @@ void AndroidTouch_Tic(void)
     }
   }
 
+  if (menuactive)
+  {
+    // menus move with the arrow keys, one step per push, repeating when held
+    static int menu_dir = 0;
+    static Uint32 next_repeat = 0;
+    int dir = 0;
+    Uint32 now = SDL_GetTicks();
+
+    SetHeld(&held_up, key_up, false);
+    SetHeld(&held_down, key_down, false);
+    SetHeld(&held_left, key_strafeleft, false);
+    SetHeld(&held_right, key_straferight, false);
+    SetHeld(&held_run, key_speed, false);
+
+    if (stick && fabsf(dx) + fabsf(dy) > MENU_STICK)
+    {
+      if (fabsf(dy) >= fabsf(dx))
+        dir = dy < 0 ? key_menu_up : key_menu_down;
+      else
+        dir = dx < 0 ? key_menu_left : key_menu_right;
+    }
+
+    if (dir != menu_dir)
+    {
+      menu_dir = dir;
+      PressKey(dir);
+      next_repeat = now + MENU_REPEAT1_MS;
+    }
+    else if (dir && SDL_TICKS_PASSED(now, next_repeat))
+    {
+      PressKey(dir);
+      next_repeat = now + MENU_REPEAT_MS;
+    }
+  }
+  else
+  {
   SetHeld(&held_up,    key_up,          stick && dy < -STICK_DEADZONE);
   SetHeld(&held_down,  key_down,        stick && dy >  STICK_DEADZONE);
   SetHeld(&held_left,  key_strafeleft,  stick && dx < -STICK_DEADZONE);
   SetHeld(&held_right, key_straferight, stick && dx >  STICK_DEADZONE);
   SetHeld(&held_run,   key_speed,       stick && sqrtf(dx * dx + dy * dy) > STICK_RUN);
+  }
 
   if (pending_turn != 0.0f)
   {
