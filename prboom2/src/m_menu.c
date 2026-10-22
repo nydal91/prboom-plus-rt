@@ -47,6 +47,7 @@
 #include "dstrings.h"
 #include "d_main.h"
 #include <math.h>
+#include <SDL.h>
 #include "v_video.h"
 #include "w_wad.h"
 #include "r_main.h"
@@ -4019,6 +4020,7 @@ typedef enum
   gfxset_crtinterlacing,
   gfxset_muzzleflash,
   gfxset_classicflashlight,
+  gfxset_showfps,
   gfxset_hudstyle,
 #if RT_SEPARATE_HUD_SCALE
   gfxset_statusbarscale,
@@ -4048,6 +4050,7 @@ setup_menu_t RT_GraphicsSettings[] =
   {"CRT Interlacing", S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+2) * 8, {"rt_crt_interlacing"}, 0, 0, NULL, RT_options_crt_interlacing },
   {"Muzzle flash",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+3) * 8, {"rt_muzzleflash_intensity"}, 0, 0, NULL, RT_options_muzzleflash_intensity },
   {"Flashlight",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+4) * 8, {"rt_classic_flashlight"}, 0, 0, NULL, RT_options_classic_flashlight },
+  {"Show FPS",    S_YESNO,   m_null, RT_X, RT_Y + (RT_U+5) * 8, {"show_fps"}},
 
   {"HUD style",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+6) * 8, {"rt_hud_style"}, 0, 0, M_RT_ApplyHUD, RT_options_hud_style},
 #if RT_SEPARATE_HUD_SCALE
@@ -7292,3 +7295,61 @@ int M_TouchTap(float nx, float ny)
   return -1;
 }
 #endif
+
+//
+// M_DrawFPS
+//
+// Frame rate counter in the top right corner ("Show FPS" in Display Options).
+//
+int show_fps = 0;
+
+#if defined(__ANDROID__) || defined(PRBOOM_TOUCH_CONTROLS)
+#define FPS_Y 40   // below the top row of touch buttons
+#else
+#define FPS_Y 2
+#endif
+
+void M_DrawFPS(void)
+{
+  static unsigned int last_tick = 0, frames = 0, fps = 0;
+  unsigned int tick = SDL_GetTicks();
+  char text[32];
+  const char *c;
+  int width = 0, x;
+
+  frames++;
+  if (tick - last_tick >= 500)
+  {
+    fps = (frames * 1000 + (tick - last_tick) / 2) / (tick - last_tick);
+    frames = 0;
+    last_tick = tick;
+  }
+
+  if (!show_fps || !hu_font[0].lumpnum)
+  {
+    return;
+  }
+
+  snprintf(text, sizeof(text), "%u FPS", fps);
+  for (c = text; *c; c++)
+  {
+    int i = toupper(*c) - HU_FONTSTART;
+    width += (i < 0 || i >= HU_FONTSIZE) ? 4 : hu_font[i].width;
+  }
+
+  // right aligned on the real screen edge, under the touch buttons on phones
+  x = 320 - 4 - width;
+  for (c = text; *c; c++)
+  {
+    int i = toupper(*c) - HU_FONTSTART;
+    if (i < 0 || i >= HU_FONTSIZE)
+    {
+      x += 4;
+      continue;
+    }
+    V_DrawNumPatch(x, FPS_Y, 0, hu_font[i].lumpnum,
+                   fps >= 50 ? CR_GREEN : fps >= 30 ? CR_GOLD : CR_RED,
+                   VPT_STRETCH | VPT_ALIGN_RIGHT_TOP | VPT_TRANS);
+    x += hu_font[i].width;
+  }
+}

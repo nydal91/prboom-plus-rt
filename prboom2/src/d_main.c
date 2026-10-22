@@ -446,6 +446,8 @@ void D_Display (fixed_t frac)
 
   HU_DrawDemoProgress(true); //e6y
 
+  M_DrawFPS();
+
   if (V_GetMode() == VID_MODERT)
   {
 #ifdef HAVE_TOUCH_CONTROLS
