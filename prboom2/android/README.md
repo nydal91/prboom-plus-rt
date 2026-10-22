@@ -37,8 +37,8 @@ work through SDL.
 
 ## Known limitations
 
-- Switching away from the app quits the game (the Vulkan surface is
-  destroyed and the renderer can't recreate it yet). Save before leaving.
+- Switching away from the app pauses the game; the renderer rebuilds its
+  Vulkan surface when you return.
 - No music (sound effects work); SDL2_mixer isn't built.
 - Indoor lighting is derived from the maps' sector light levels; the hand
   made per-map light data of the desktop release isn't included.

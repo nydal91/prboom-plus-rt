@@ -355,8 +355,45 @@ static void NormalizeRTSettings(rt_settings_t *settings)
 }
 
 
+#ifdef __ANDROID__
+static dboolean android_window_changed = false;
+
+void RT_OnAndroidWindowChanged(void)
+{
+  android_window_changed = true;
+}
+
+static void ApplyAndroidWindowChange(void)
+{
+  SDL_SysWMinfo wmInfo;
+
+  if (!android_window_changed || rtmain.instance == NULL)
+  {
+    return;
+  }
+  android_window_changed = false;
+
+  SDL_VERSION(&wmInfo.version);
+  if (!SDL_GetWindowWMInfo(sdl_window, &wmInfo) || wmInfo.info.android.window == NULL)
+  {
+    lprintf(LO_WARN, "RT: no Android window to recreate the surface with\n");
+    return;
+  }
+
+  RgResult r = rgSetAndroidWindow(rtmain.instance, wmInfo.info.android.window);
+  if (r != RG_SUCCESS)
+  {
+    I_Error("Can't recreate the ray tracing surface: %s\n\n%s", rgGetResultDescription(r), rt_last_message);
+  }
+}
+#endif
+
 void RT_StartFrame(void)
 {
+#ifdef __ANDROID__
+  ApplyAndroidWindowChange();
+#endif
+
   RgStartFrameInfo info =
   {
     .requestRasterizedSkyGeometryReuse = rtmain.was_new_sky ? false : true,

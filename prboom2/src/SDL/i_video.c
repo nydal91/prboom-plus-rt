@@ -249,11 +249,28 @@ while (SDL_PollEvent(Event))
   {
     continue;
   }
-  // The window surface is destroyed when the app goes to the background,
-  // and the ray tracing swapchain can't survive that: quit cleanly instead.
-  if (Event->type == SDL_APP_WILLENTERBACKGROUND || Event->type == SDL_APP_TERMINATING)
+  // Android destroys the window's surface in the background and makes a new
+  // one on return; SDL blocks this loop while paused. RT swaps the surface
+  // at the start of the next frame.
+  switch (Event->type)
   {
-    I_SafeExit(0);
+    case SDL_APP_WILLENTERBACKGROUND: lprintf(LO_INFO, "Android: entering background\n"); break;
+    case SDL_APP_DIDENTERBACKGROUND:  lprintf(LO_INFO, "Android: in background\n"); break;
+    case SDL_APP_WILLENTERFOREGROUND: lprintf(LO_INFO, "Android: entering foreground\n"); break;
+    case SDL_APP_DIDENTERFOREGROUND:
+      lprintf(LO_INFO, "Android: in foreground, recreating the surface\n");
+      if (V_GetMode() == VID_MODERT)
+      {
+        RT_OnAndroidWindowChanged();
+      }
+      break;
+    case SDL_APP_LOWMEMORY:           lprintf(LO_INFO, "Android: low memory\n"); break;
+    case SDL_APP_TERMINATING:
+      lprintf(LO_INFO, "Android: terminating\n");
+      I_SafeExit(0);
+      break;
+    case SDL_QUIT:                    lprintf(LO_INFO, "Android: quit requested\n"); break;
+    default: break;
   }
 #endif
   switch (Event->type) {

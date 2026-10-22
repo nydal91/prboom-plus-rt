@@ -467,11 +467,19 @@ void I_SafeExit(int rc)
   atexit_listentry_t *entry;
 
 #ifdef __ANDROID__
-  // the launcher treats a leftover marker as a crash
+  // Save the config and end the process: tearing down SDL, sound and the
+  // renderer from this thread races with SDL's Java side and aborted
+  // ("pthread_mutex_lock called on a destroyed mutex"). Android frees it all.
   if (rc == 0)
   {
+    M_SaveDefaults();
+    // the launcher treats a leftover marker as a crash
     remove("running.txt");
   }
+  lprintf(LO_INFO, "I_SafeExit: %d\n", rc);
+  fflush(stdout);
+  fflush(stderr);
+  _exit(rc);
 #endif
 
   // Run through all exit functions

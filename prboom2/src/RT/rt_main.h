@@ -73,6 +73,10 @@ extern rtmain_t rtmain;
 
 
 void RT_Init(void);
+#ifdef __ANDROID__
+// The app returned from the background: recreate the surface before the next frame
+void RT_OnAndroidWindowChanged(void);
+#endif
 void RT_Destroy(void);
 
 void RT_StartFrame(void);
