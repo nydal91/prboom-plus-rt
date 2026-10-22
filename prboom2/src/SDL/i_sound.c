@@ -489,8 +489,10 @@ static void I_UpdateSound(void *unused, Uint8 *stream, int len)
   // Mixing channel index.
   int       chan;
 
-  if (snd_midiplayer == NULL) // This is but a temporary fix. Please do remove after a more definitive one!
-    memset(stream, 0, len);
+  // SDL2 doesn't clear the buffer before calling us, and sound effects are
+  // added on top of what it holds: start from silence (music below writes
+  // over it when it plays), or old audio loops and piles up into noise
+  memset(stream, 0, len);
 
   // NSM: when dumping sound, ignore the callback calls and only
   // service dumping calls

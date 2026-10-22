@@ -522,7 +522,12 @@ static void I_SetAffinityMask(void)
 #ifndef __ANDROID__
   // Not on Android: there's no SDL_mixer, and pinning the game, audio and GPU
   // driver threads to core 0 (often a slow efficiency core) made sound stutter
+#ifdef HAVE_MIXER
+  // only SDL_mixer needs it; without it, sound and the renderer would share core 0
   if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
+#else
+  if (0)
+#endif
   {
     process_affinity_mask = 1;
   }
