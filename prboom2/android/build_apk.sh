@@ -9,6 +9,9 @@
 #   HOST_BUILD      a native (desktop) build dir of prboom2, for the rdatawad tool
 # Optional:
 #   EXTRA_IWAD      a game WAD to bundle too (e.g. your doom.wad); it becomes the default
+#   RT_DATA         the ovrd folder of an official PrBoom+ RT release (1.0.7): its
+#                   materials and per-map lights are converted for phones
+#                   (BC -> RGBA8, needs `pip install texture2ddecoder`) and bundled
 #   OUT             output folder (default: ./out)
 #   KEYSTORE        signing keystore (default: a generated debug key in $OUT)
 set -euo pipefail
@@ -21,8 +24,8 @@ BT="$ANDROID_HOME/build-tools/35.0.0"
 ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
 API=31
 ABI=arm64-v8a
-VERSION_CODE="${VERSION_CODE:-8}"
-VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android8}"
+VERSION_CODE="${VERSION_CODE:-9}"
+VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android9}"
 TOOLCHAIN=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
            -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-$API -DCMAKE_BUILD_TYPE=Release)
 JOBS="$(nproc)"
@@ -69,6 +72,12 @@ cp "$B/shaders/"*.spv "$S/assets/ovrd/shaders/"
 cp "$RTGL1_SDK_PATH/Tools/BlueNoise_LDR_RGBA_128.ktx2" "$S/assets/ovrd/"
 python3 -I "$HERE/tools/make_water_normal_ktx2.py" "$S/assets/ovrd" > /dev/null
 cp "$HERE/ovrd/textures_metainfo.txt" "$S/assets/ovrd/"
+if [ -n "${RT_DATA:-}" ]; then
+    rm -rf "$B/rtdata"
+    python3 -I "$HERE/tools/convert_bc_ktx2.py" "$RT_DATA" "$B/rtdata"
+    cp -r "$B/rtdata/mat" "$S/assets/ovrd/"
+    cp "$B/rtdata/"*.txt "$B/rtdata/WaterNormal_n.ktx2" "$S/assets/ovrd/"
+fi
 cp "$B/prboom/prboom-plus.wad" "$S/assets/"
 cp "$IWAD" "$S/assets/freedoom1.wad"
 if [ -n "${EXTRA_IWAD:-}" ]; then
