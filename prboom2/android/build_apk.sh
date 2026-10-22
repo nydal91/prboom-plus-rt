@@ -8,6 +8,7 @@
 #   IWAD            path to freedoom1.wad (bundled as the default game)
 #   HOST_BUILD      a native (desktop) build dir of prboom2, for the rdatawad tool
 # Optional:
+#   EXTRA_IWAD      a game WAD to bundle too (e.g. your doom.wad); it becomes the default
 #   OUT             output folder (default: ./out)
 #   KEYSTORE        signing keystore (default: a generated debug key in $OUT)
 set -euo pipefail
@@ -20,8 +21,8 @@ BT="$ANDROID_HOME/build-tools/35.0.0"
 ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
 API=31
 ABI=arm64-v8a
-VERSION_CODE="${VERSION_CODE:-6}"
-VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android6}"
+VERSION_CODE="${VERSION_CODE:-7}"
+VERSION_NAME="${VERSION_NAME:-2.6.1-rt1.0.2-android7}"
 TOOLCHAIN=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
            -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-$API -DCMAKE_BUILD_TYPE=Release)
 JOBS="$(nproc)"
@@ -70,6 +71,12 @@ python3 -I "$HERE/tools/make_water_normal_ktx2.py" "$S/assets/ovrd" > /dev/null
 cp "$HERE/ovrd/textures_metainfo.txt" "$S/assets/ovrd/"
 cp "$B/prboom/prboom-plus.wad" "$S/assets/"
 cp "$IWAD" "$S/assets/freedoom1.wad"
+if [ -n "${EXTRA_IWAD:-}" ]; then
+    # keep the WAD's own name (lowercase), the engine detects the game by it
+    EXTRA_NAME="$(basename "$EXTRA_IWAD" | tr 'A-Z' 'a-z' | sed 's/^[0-9]*-//')"
+    cp "$EXTRA_IWAD" "$S/assets/$EXTRA_NAME"
+    echo "$EXTRA_NAME" > "$S/assets/default_iwad.txt"
+fi
 cp "$HERE/licenses/"* "$S/assets/licenses/"
 cp "$SDL2_SRC/LICENSE.txt" "$S/assets/licenses/SDL2-LICENSE.txt"
 cp "$PRBOOM2/COPYING" "$S/assets/licenses/PRBOOM-PLUS-COPYING.txt"
@@ -87,7 +94,7 @@ echo "== APK"
     --manifest "$HERE/app/AndroidManifest.xml" \
     --min-sdk-version $API --target-sdk-version 34 \
     --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
-    -A "$S/assets" "$B/res.zip"
+    -0 wad -A "$S/assets" "$B/res.zip"
 ( cd "$J/dex" && zip -q "$B/unaligned.apk" classes.dex )
 ( cd "$S" && zip -q -r "$B/unaligned.apk" lib )
 

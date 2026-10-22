@@ -188,7 +188,16 @@ public class LauncherActivity extends Activity {
             }
         }
 
-        // 3. bundled Freedoom
+        // 3. a WAD bundled at build time (assets/default_iwad.txt names it)
+        String bundled = readFile(new File(getFilesDir(), "default_iwad.txt"), 256);
+        if (bundled != null) {
+            File f = new File(getFilesDir(), new File(bundled.trim()).getName());
+            if (!bundled.trim().isEmpty() && f.isFile()) {
+                return f.getAbsolutePath();
+            }
+        }
+
+        // 4. bundled Freedoom
         return new File(getFilesDir(), BUNDLED_IWAD).getAbsolutePath();
     }
 
