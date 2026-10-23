@@ -9,15 +9,16 @@
 
 // Touch controls for phones:
 //
-//  +--------+--------+--------+--------+--------+
-//  |  MENU  |  MAP   | ENTER  | PREV W | NEXT W |   top 18%: buttons
-//  +--------+--------+--------+--------+--------+
+//  +-------+-------+-------+-------+-------+-------+
+//  | MENU  |  MAP  | ENTER | LIGHT |PREV W |NEXT W |   top 18%: buttons
+//  +-------+-------+-------+-------+-------+-------+
 //  |                    |                 | USE |
 //  |  move stick        |  drag to turn   +-----+
 //  |  (left 40%)        |                 |FIRE |
 //  +--------------------+-----------------+-----+
 //
-// The Android back button opens the menu.
+// The Android back button opens the menu. The overlay hides while a game
+// controller is in use and comes back when the screen is touched.
 
 void AndroidTouch_Init(void);
 // Returns true if the event was consumed

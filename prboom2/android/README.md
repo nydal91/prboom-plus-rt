@@ -33,16 +33,18 @@ custom levels are lit from their own sector light levels.
 ## Touch controls
 
 ```
-+--------+--------+--------+--------+--------+
-|  MENU  |  MAP   | ENTER  | PREV W | NEXT W |   top 18%: buttons
-+--------+--------+--------+--------+--------+
++-------+-------+-------+-------+-------+-------+
+| MENU  |  MAP  | ENTER | LIGHT |PREV W |NEXT W |   top 18%: buttons
++-------+-------+-------+-------+-------+-------+
 |                    |                 | USE |
 |  move stick        |  drag to turn   +-----+
 |  (left 40%)        |                 |FIRE |
 +--------------------+-----------------+-----+
 ```
 
-The stick runs when pushed far. Back opens the menu. In menus, tap an item
+LIGHT turns the flashlight on and off. The stick runs when pushed far. The
+overlay hides while a controller is in use and comes back when you touch the
+screen. Back opens the menu. In menus, tap an item
 to choose it, or drag anywhere to move the cursor (hold to repeat); on the
 settings screens the first tap highlights a row and a second tap changes it,
 then drag left/right to pick a value and tap to confirm. Bluetooth keyboards work too.

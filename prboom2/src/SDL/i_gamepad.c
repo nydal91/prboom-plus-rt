@@ -49,6 +49,9 @@ typedef struct
 } held_t;
 
 static held_t held[SDL_CONTROLLER_BUTTON_MAX];
+
+// the controller was the last input used (see I_Gamepad_InUse)
+static dboolean pad_in_use = false;
 static int pad_tic = 0;
 
 // keys held from axes
@@ -106,6 +109,7 @@ static void OpenPad(int device_index)
       if (pads[i])
       {
         lprintf(LO_INFO, "I_Gamepad: opened %s\n", SDL_GameControllerName(pads[i]));
+        pad_in_use = true;
       }
       return;
     }
@@ -269,6 +273,7 @@ dboolean I_Gamepad_HandleEvent(const SDL_Event *ev)
     {
       held_t *h = &held[ev->cbutton.button];
 
+      pad_in_use = true;
       if (h->key || h->key2)
       {
         // still held from a quick earlier press
@@ -302,7 +307,12 @@ dboolean I_Gamepad_HandleEvent(const SDL_Event *ev)
     }
 
     case SDL_CONTROLLERAXISMOTION:
-      return true;   // polled in I_Gamepad_Tic
+      // polled in I_Gamepad_Tic; a real push (not stick drift) counts as use
+      if (abs(ev->caxis.value) > 16000)
+      {
+        pad_in_use = true;
+      }
+      return true;
 
     default:
       return false;
@@ -547,4 +557,23 @@ void I_Gamepad_Rumble(float low, float high, int ms)
       SDL_GameControllerRumble(pads[i], lo, hi, (Uint32)ms);
     }
   }
+}
+
+dboolean I_Gamepad_InUse(void)
+{
+  int i;
+
+  for (i = 0; i < MAX_PADS; i++)
+  {
+    if (pads[i])
+    {
+      return pad_in_use;
+    }
+  }
+  return false;
+}
+
+void I_Gamepad_TouchUsed(void)
+{
+  pad_in_use = false;
 }

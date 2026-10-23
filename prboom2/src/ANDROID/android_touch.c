@@ -15,6 +15,12 @@
 #include "v_video.h"
 #include "lprintf.h"
 #include "m_menu.h"
+#include <ctype.h>
+#include "hu_lib.h"
+#include "hu_stuff.h"
+#include "SDL/i_gamepad.h"
+
+extern patchnum_t hu_font[HU_FONTSIZE];
 
 // zones, in normalized screen coordinates
 #define TOP_BAR_H       0.18f
@@ -160,9 +166,13 @@ static finger_t *NewFinger(SDL_FingerID id)
   return NULL;
 }
 
+#define TOP_BUTTONS 6
+
+static const char *top_labels[TOP_BUTTONS] = { "MENU", "MAP", "ENTER", "LIGHT", "PREV W", "NEXT W" };
+
 static void TopBarKeys(float x, int *key, int *key2)
 {
-  int slot = (int)(x * 5.0f);
+  int slot = (int)(x * TOP_BUTTONS);
 
   *key2 = 0;
   switch (slot)
@@ -170,7 +180,8 @@ static void TopBarKeys(float x, int *key, int *key2)
     case 0:  *key = key_escape; break;
     case 1:  *key = key_map; break;
     case 2:  *key = key_menu_enter; *key2 = 'y'; break; // also answers "press Y" prompts
-    case 3:  *key = key_prevweapon; break;
+    case 3:  *key = key_rt_flashlight; break;
+    case 4:  *key = key_prevweapon; break;
     default: *key = key_nextweapon; break;
   }
 }
@@ -191,6 +202,9 @@ dboolean AndroidTouch_HandleEvent(const SDL_Event *ev)
     case SDL_FINGERDOWN:
     {
       float x = ev->tfinger.x, y = ev->tfinger.y;
+
+      // touching the screen brings the overlay back after controller use
+      I_Gamepad_TouchUsed();
       finger_t *f = NewFinger(ev->tfinger.fingerId);
 
       if (!f)
@@ -427,6 +441,40 @@ static void Outline(int x, int y, int w, int h, byte color)
   V_FillRect(0, x + w - 1, y, 1, h, color);
 }
 
+// text centered at a screen position, in the HUD font (drawn in the 320x200
+// menu space, which the renderer scales; positions outside it still draw)
+static void Label(float sx, float sy, const char *text)
+{
+  const stretch_param_t *sp = &stretch_params[0];
+  float vx, vy;
+  int width = 0, x;
+  const char *c;
+
+  if (!sp->video || sp->video->width <= 0 || sp->video->height <= 0 || !hu_font[0].lumpnum)
+  {
+    return;
+  }
+  for (c = text; *c; c++)
+  {
+    int i = toupper(*c) - HU_FONTSTART;
+    width += (i < 0 || i >= HU_FONTSIZE) ? 4 : hu_font[i].width;
+  }
+  vx = (sx - sp->deltax1) * 320.0f / sp->video->width;
+  vy = (sy - sp->deltay1) * 200.0f / sp->video->height;
+  x = (int)(vx - width / 2.0f);
+  for (c = text; *c; c++)
+  {
+    int i = toupper(*c) - HU_FONTSTART;
+    if (i < 0 || i >= HU_FONTSIZE)
+    {
+      x += 4;
+      continue;
+    }
+    V_DrawNumPatch(x, (int)(vy - 4), 0, hu_font[i].lumpnum, CR_GRAY, VPT_STRETCH | VPT_TRANS);
+    x += hu_font[i].width;
+  }
+}
+
 void AndroidTouch_Draw(void)
 {
   const int W = SCREENWIDTH, H = SCREENHEIGHT;
@@ -443,15 +491,16 @@ void AndroidTouch_Draw(void)
     }
   }
 
-  if (gamestate != GS_LEVEL || menuactive)
+  if (gamestate != GS_LEVEL || menuactive || I_Gamepad_InUse())
   {
     return;
   }
 
   // top bar buttons
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < TOP_BUTTONS; i++)
   {
-    Outline(i * W / 5 + 2, 2, W / 5 - 4, (int)(TOP_BAR_H * H) - 4, gray);
+    Outline(i * W / TOP_BUTTONS + 2, 2, W / TOP_BUTTONS - 4, (int)(TOP_BAR_H * H) - 4, gray);
+    Label((i + 0.5f) * W / TOP_BUTTONS, TOP_BAR_H * H * 0.5f, top_labels[i]);
   }
 
   // use and fire buttons
@@ -459,6 +508,8 @@ void AndroidTouch_Draw(void)
           (int)((1.0f - SIDE_BTN_X) * W) - 4, (int)((FIRE_Y - TOP_BAR_H) * H) - 4, gray);
   Outline((int)(SIDE_BTN_X * W) + 2, (int)(FIRE_Y * H) + 2,
           (int)((1.0f - SIDE_BTN_X) * W) - 4, (int)((1.0f - FIRE_Y) * H) - 4, gray);
+  Label((1.0f + SIDE_BTN_X) * 0.5f * W, (TOP_BAR_H + FIRE_Y) * 0.5f * H, "USE");
+  Label((1.0f + SIDE_BTN_X) * 0.5f * W, (FIRE_Y + 1.0f) * 0.5f * H, "FIRE");
 
   // stick: a box around where the finger went down
   for (int i = 0; i < MAX_FINGERS; i++)

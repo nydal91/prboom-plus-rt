@@ -30,6 +30,11 @@ void I_Gamepad_GetMove(int *forward, int *side, int *turn);
 // Rumble: motor strengths 0..1 (low = heavy, high = light), duration in ms.
 // Does nothing when "Controller rumble" is off or no controller can rumble.
 extern int gamepad_rumble;
+
+// True while a controller is connected and was used more recently than the
+// touch screen; the touch overlay hides then. Touching the screen clears it.
+dboolean I_Gamepad_InUse(void);
+void I_Gamepad_TouchUsed(void);
 void I_Gamepad_Rumble(float low, float high, int ms);
 
 #endif
