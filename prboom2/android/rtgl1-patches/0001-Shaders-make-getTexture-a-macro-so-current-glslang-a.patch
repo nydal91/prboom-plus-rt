@@ -1,0 +1,30 @@
+From 2d4d8979fadc2e5046262ff6398614192b67a150 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 18:06:16 +0200
+Subject: [PATCH 01/11] Shaders: make getTexture a macro so current glslang
+ accepts it
+
+---
+ Source/Shaders/ShaderCommonGLSLFunc.h | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/Source/Shaders/ShaderCommonGLSLFunc.h b/Source/Shaders/ShaderCommonGLSLFunc.h
+index 750a30d..e3167b7 100644
+--- a/Source/Shaders/ShaderCommonGLSLFunc.h
++++ b/Source/Shaders/ShaderCommonGLSLFunc.h
+@@ -65,10 +65,8 @@ layout(
+     binding = BINDING_TEXTURES)
+     uniform sampler2D globalTextures[];
+ 
+-sampler2D getTexture(uint textureIndex)
+-{
+-    return globalTextures[nonuniformEXT(textureIndex)];
+-}
++// Newer glslang rejects functions returning sampler types, so use a macro
++#define getTexture(textureIndex) (globalTextures[nonuniformEXT(textureIndex)])
+ 
+ vec4 getTextureSample(uint textureIndex, const vec2 texCoord)
+ {
+-- 
+2.43.0
+

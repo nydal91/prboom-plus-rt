@@ -1,0 +1,156 @@
+From fdb3d176638ffa90abb57a1ea39dd42e1f5652dc Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 18:35:12 +0200
+Subject: [PATCH 05/11] Ray query passes: check descriptor and compute limits
+ at startup
+
+Mobile limits are far lower than desktop ones, and exceeding them is
+undefined behavior rather than an error. Compare what the path tracer's
+pipeline layout needs (framebuffers, bindless textures, combined set,
+workgroup size, push constants) with the device limits and fail with a
+message naming the limit, e.g.:
+  Device limit maxPerStageDescriptorSampledImages is 1000, but the ray
+  query path tracer needs 1130 (bindless texture array: 1024)
+---
+ Source/RayTracingPipeline.cpp | 65 ++++++++++++++++++++++++++++++++++-
+ Source/RayTracingPipeline.h   |  1 +
+ Source/TextureManager.cpp     |  5 +++
+ Source/TextureManager.h       |  2 ++
+ 4 files changed, 72 insertions(+), 1 deletion(-)
+
+diff --git a/Source/RayTracingPipeline.cpp b/Source/RayTracingPipeline.cpp
+index 8a4887a..765404e 100644
+--- a/Source/RayTracingPipeline.cpp
++++ b/Source/RayTracingPipeline.cpp
+@@ -21,6 +21,7 @@
+ #include "RayTracingPipeline.h"
+ 
+ #include "Generated/ShaderCommonC.h"
++#include "Generated/ShaderCommonCFramebuf.h"
+ #include "RgException.h"
+ #include "Utils.h"
+ 
+@@ -66,9 +67,12 @@ RayTracingPipeline::RayTracingPipeline(
+     indirectIlluminationMaxAlbedoLayers(_rgInfo.indirectIlluminationMaxAlbedoLayers)
+ {
+     // no shader binding table with ray queries
+-    (void)_physDevice;
+     (void)_allocator;
+ 
++    // mobile GPUs have much lower descriptor limits than desktop ones,
++    // and exceeding them is undefined behavior rather than an error, so check up front
++    CheckDeviceLimits(*_physDevice, _textureMgr->GetMaxTextureCount());
++
+     // TLAS, uniform, blue noise, light sources and cubemaps are merged into one set;
+     // their layouts are recreated in CreateCombinedDescriptors()
+     (void)_uniform;
+@@ -152,6 +156,65 @@ static_assert(BINDING_RQ_LIGHT_SOURCES_FIRST > BINDING_RQ_ACCELERATION_STRUCTURE
+ 
+ }
+ 
++void RayTracingPipeline::CheckDeviceLimits(const PhysicalDevice &physDevice, uint32_t maxTextureCount) const
++{
++    VkPhysicalDeviceProperties props = {};
++    vkGetPhysicalDeviceProperties(physDevice.Get(), &props);
++    const VkPhysicalDeviceLimits &lim = props.limits;
++    const VkPhysicalDeviceAccelerationStructurePropertiesKHR &asProps = physDevice.GetASProperties();
++
++    // Descriptors visible to the compute stage of the ray query pipeline layout:
++    //  framebuffers:   ShFramebuffers_Count storage images + ShFramebuffers_Count combined image samplers
++    //  vertex data:    9 storage buffers (ASManager)
++    //  textures:       maxTextureCount combined image samplers
++    //  combined set:   1 acceleration structure, 1 uniform buffer, 1 sampled image (blue noise),
++    //                  MAX_CUBEMAP_COUNT + 1 combined image samplers, LIGHT_SOURCE_BINDING_COUNT storage buffers
++    const uint32_t vertexDataBuffers    = 9;
++    const uint32_t storageImages        = ShFramebuffers_Count;
++    const uint32_t combinedSamplers     = ShFramebuffers_Count + maxTextureCount + MAX_CUBEMAP_COUNT + 1;
++    const uint32_t sampledImages        = combinedSamplers + 1;
++    const uint32_t samplers             = combinedSamplers;
++    const uint32_t storageBuffers       = vertexDataBuffers + LIGHT_SOURCE_BINDING_COUNT;
++    const uint32_t uniformBuffers       = 1;
++    const uint32_t accelStructs         = 1;
++    const uint32_t resources            = storageImages + sampledImages + storageBuffers + uniformBuffers;
++
++    struct Check { uint32_t needed; uint32_t limit; const char *name; };
++    const Check checks[] =
++    {
++        { DESC_SET_RQ_COUNT,    lim.maxBoundDescriptorSets,                         "maxBoundDescriptorSets" },
++        { storageImages,        lim.maxPerStageDescriptorStorageImages,             "maxPerStageDescriptorStorageImages" },
++        { sampledImages,        lim.maxPerStageDescriptorSampledImages,             "maxPerStageDescriptorSampledImages" },
++        { samplers,             lim.maxPerStageDescriptorSamplers,                  "maxPerStageDescriptorSamplers" },
++        { storageBuffers,       lim.maxPerStageDescriptorStorageBuffers,            "maxPerStageDescriptorStorageBuffers" },
++        { uniformBuffers,       lim.maxPerStageDescriptorUniformBuffers,            "maxPerStageDescriptorUniformBuffers" },
++        { resources,            lim.maxPerStageResources,                           "maxPerStageResources" },
++        { storageImages,        lim.maxDescriptorSetStorageImages,                  "maxDescriptorSetStorageImages" },
++        { sampledImages,        lim.maxDescriptorSetSampledImages,                  "maxDescriptorSetSampledImages" },
++        { samplers,             lim.maxDescriptorSetSamplers,                       "maxDescriptorSetSamplers" },
++        { storageBuffers,       lim.maxDescriptorSetStorageBuffers,                 "maxDescriptorSetStorageBuffers" },
++        { uniformBuffers,       lim.maxDescriptorSetUniformBuffers,                 "maxDescriptorSetUniformBuffers" },
++        { accelStructs,         asProps.maxPerStageDescriptorAccelerationStructures,"maxPerStageDescriptorAccelerationStructures" },
++        { accelStructs,         asProps.maxDescriptorSetAccelerationStructures,     "maxDescriptorSetAccelerationStructures" },
++        { COMPUTE_RAY_QUERY_GROUP_SIZE_X * COMPUTE_RAY_QUERY_GROUP_SIZE_Y,
++                                lim.maxComputeWorkGroupInvocations,                 "maxComputeWorkGroupInvocations" },
++        { static_cast<uint32_t>(sizeof(RayQueryPush)),
++                                lim.maxPushConstantsSize,                           "maxPushConstantsSize" },
++    };
++
++    for (const Check &c : checks)
++    {
++        if (c.needed > c.limit)
++        {
++            using namespace std::string_literals;
++            throw RgException(RG_CANT_FIND_PHYSICAL_DEVICE,
++                "Device limit "s + c.name + " is " + std::to_string(c.limit) +
++                ", but the ray query path tracer needs " + std::to_string(c.needed) +
++                " (bindless texture array: " + std::to_string(maxTextureCount) + ")");
++        }
++    }
++}
++
+ void RayTracingPipeline::CreateCombinedDescriptors()
+ {
+     // Types and counts must match the source sets' layouts:
+diff --git a/Source/RayTracingPipeline.h b/Source/RayTracingPipeline.h
+index a167fcf..1194c8a 100644
+--- a/Source/RayTracingPipeline.h
++++ b/Source/RayTracingPipeline.h
+@@ -86,6 +86,7 @@ public:
+     void OnShaderReload(const ShaderManager *shaderManager) override;
+ 
+ private:
++    void CheckDeviceLimits(const PhysicalDevice &physDevice, uint32_t maxTextureCount) const;
+     void CreateCombinedDescriptors();
+     void CreatePipelineLayout(const VkDescriptorSetLayout *pSetLayouts, uint32_t setLayoutCount);
+     void CreatePipelines(const ShaderManager *shaderManager);
+diff --git a/Source/TextureManager.cpp b/Source/TextureManager.cpp
+index 71c1cb2..515635d 100644
+--- a/Source/TextureManager.cpp
++++ b/Source/TextureManager.cpp
+@@ -727,6 +727,11 @@ VkDescriptorSetLayout TextureManager::GetDescSetLayout() const
+     return textureDesc->GetDescSetLayout();
+ }
+ 
++uint32_t TextureManager::GetMaxTextureCount() const
++{
++    return static_cast<uint32_t>(textures.size());
++}
++
+ void TextureManager::Subscribe(std::shared_ptr<IMaterialDependency> subscriber)
+ {
+     subscribers.emplace_back(subscriber);
+diff --git a/Source/TextureManager.h b/Source/TextureManager.h
+index 39578f9..9cbda69 100644
+--- a/Source/TextureManager.h
++++ b/Source/TextureManager.h
+@@ -75,6 +75,8 @@ public:
+ 
+     VkDescriptorSet GetDescSet(uint32_t frameIndex) const;
+     VkDescriptorSetLayout GetDescSetLayout() const;
++    // Size of the bindless texture descriptor array
++    uint32_t GetMaxTextureCount() const;
+ 
+     // Subscribe to material change event.
+     // shared_ptr will be transformed to weak_ptr
+-- 
+2.43.0
+

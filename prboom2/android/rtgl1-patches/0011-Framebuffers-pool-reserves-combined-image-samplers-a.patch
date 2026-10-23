@@ -1,0 +1,28 @@
+From 87602ecbc77977f688c6ff282fdf0d109982405c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 22:40:16 +0200
+Subject: [PATCH 11/11] Framebuffers: pool reserves combined image samplers, as
+ the layout uses (fixes VK_ERROR_OUT_OF_POOL_MEMORY on RADV)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K7ddVeaJCm7c4L64HWexay
+---
+ Source/Framebuffers.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Source/Framebuffers.cpp b/Source/Framebuffers.cpp
+index 2361e42..9ab7ddb 100644
+--- a/Source/Framebuffers.cpp
++++ b/Source/Framebuffers.cpp
+@@ -136,7 +136,7 @@ void Framebuffers::CreateDescriptors()
+ 
+     poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+     poolSizes[0].descriptorCount = allBindingsCount * FRAMEBUFFERS_HISTORY_LENGTH;
+-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
++    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+     poolSizes[1].descriptorCount = allBindingsCount * FRAMEBUFFERS_HISTORY_LENGTH;
+ 
+     VkDescriptorPoolCreateInfo poolInfo = {};
+-- 
+2.43.0
+

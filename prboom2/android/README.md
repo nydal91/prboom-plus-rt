@@ -82,6 +82,21 @@ with "Controller rumble" in Options → Display Options.
 
 ## Building
 
+The renderer is [RayTracedGL1](https://github.com/sultim-t/RayTracedGL1)
+v1.1.1 with the patches in `rtgl1-patches/` (ray queries instead of ray
+tracing pipelines, Android surface, fixes):
+
+```
+git clone https://github.com/sultim-t/RayTracedGL1 && cd RayTracedGL1
+git checkout v1.1.1 && git am /path/to/prboom2/android/rtgl1-patches/*.patch
+```
+
 `build_apk.sh` builds everything without Gradle: RayTracedGL1, its shaders,
 SDL2 and the game with the NDK, then the Java wrapper with javac/d8, and
 packages, aligns and signs the APK. See the variables at the top of the script.
+`RT_DATA` takes the `ovrd` folder of the official PrBoom+ RT 1.0.7 release
+(materials and map lights), `IWAD` / `IWAD2` Freedoom 1 and 2.
+
+The Linux build (`../linux/`) is a portable x86-64 build of the same source
+(Zig as the C compiler, glibc 2.29+), configured with `-DPRBOOM_GL_SHIM=ON
+-DRTGL1_LIBRARY=...`; `run.sh` there is its launcher.

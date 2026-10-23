@@ -1,0 +1,142 @@
+From 631c72c1f7f1f1329d83fe602262faa1c365016b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 19:26:00 +0200
+Subject: [PATCH 07/11] Android: VK_KHR_android_surface support
+ (RG_WITH_SURFACE_ANDROID); include <algorithm> in Utils.h
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K7ddVeaJCm7c4L64HWexay
+---
+ CMakeLists.txt          |  7 +++++++
+ Include/RTGL1/RTGL1.h   | 12 ++++++++++++
+ Source/Utils.h          |  2 ++
+ Source/VulkanDevice.cpp | 24 ++++++++++++++++++++++++
+ 4 files changed, 45 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7af7faf..518c313 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -185,6 +185,7 @@ option(RG_WITH_SURFACE_METAL    "Build with Metal VkSurfaceKHR support"     OFF)
+ option(RG_WITH_SURFACE_WAYLAND  "Build with Wayland VkSurfaceKHR support"   OFF)
+ option(RG_WITH_SURFACE_XCB      "Build with Xcb VkSurfaceKHR support"       OFF)
+ option(RG_WITH_SURFACE_XLIB     "Build with Xlib VkSurfaceKHR support"      OFF)
++option(RG_WITH_SURFACE_ANDROID  "Build with Android VkSurfaceKHR support"   OFF)
+ 
+ option(RG_WITH_NVIDIA_DLSS      "Build RTGL1 with Nvidia DLSS"              OFF)
+ 
+@@ -228,6 +229,12 @@ if (RG_WITH_SURFACE_XLIB)
+     add_definitions(-DVK_USE_PLATFORM_XLIB_KHR)
+ endif()
+ 
++if (RG_WITH_SURFACE_ANDROID)
++    message(STATUS "RG_WITH_SURFACE_ANDROID enabled")
++    add_definitions(-DRG_USE_SURFACE_ANDROID)
++    add_definitions(-DVK_USE_PLATFORM_ANDROID_KHR)
++endif()
++
+ 
+ add_library(RayTracedGL1 SHARED  
+     ${Sources}
+diff --git a/Include/RTGL1/RTGL1.h b/Include/RTGL1/RTGL1.h
+index c3cb02e..2e80998 100644
+--- a/Include/RTGL1/RTGL1.h
++++ b/Include/RTGL1/RTGL1.h
+@@ -56,6 +56,9 @@
+ #ifdef RG_USE_SURFACE_XLIB
+     #include <X11/Xlib.h>
+ #endif // RG_USE_SURFACE_XLIB
++#ifdef RG_USE_SURFACE_ANDROID
++    struct ANativeWindow;
++#endif // RG_USE_SURFACE_ANDROID
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -114,6 +117,7 @@ typedef struct RgMetalSurfaceCreateInfo RgMetalSurfaceCreateInfo;
+ typedef struct RgWaylandSurfaceCreateInfo RgWaylandSurfaceCreateInfo;
+ typedef struct RgXcbSurfaceCreateInfo RgXcbSurfaceCreateInfo;
+ typedef struct RgXlibSurfaceCreateInfo RgXlibSurfaceCreateInfo;
++typedef struct RgAndroidSurfaceCreateInfo RgAndroidSurfaceCreateInfo;
+ 
+ #ifdef RG_USE_SURFACE_WIN32
+ typedef struct RgWin32SurfaceCreateInfo
+@@ -154,6 +158,13 @@ typedef struct RgXlibSurfaceCreateInfo
+ } RgXlibSurfaceCreateInfo;
+ #endif // RG_USE_SURFACE_XLIB
+ 
++#ifdef RG_USE_SURFACE_ANDROID
++typedef struct RgAndroidSurfaceCreateInfo
++{
++    struct ANativeWindow    *window;
++} RgAndroidSurfaceCreateInfo;
++#endif // RG_USE_SURFACE_ANDROID
++
+ typedef struct RgInstanceCreateInfo
+ {
+     // Application name.
+@@ -167,6 +178,7 @@ typedef struct RgInstanceCreateInfo
+     RgWaylandSurfaceCreateInfo  *pWaylandSurfaceCreateInfo;
+     RgXcbSurfaceCreateInfo      *pXcbSurfaceCreateInfo;
+     RgXlibSurfaceCreateInfo     *pXlibSurfaceCreateInfo;
++    RgAndroidSurfaceCreateInfo  *pAndroidSurfaceCreateInfo;
+ 
+     RgBool32                    enableValidationLayer;
+     // Optional function to print messages from the library.
+diff --git a/Source/Utils.h b/Source/Utils.h
+index add411e..181238f 100644
+--- a/Source/Utils.h
++++ b/Source/Utils.h
+@@ -23,6 +23,8 @@
+ #include "Common.h"
+ #include "RTGL1/RTGL1.h"
+ 
++#include <algorithm>
++
+ namespace RTGL1
+ {
+ 
+diff --git a/Source/VulkanDevice.cpp b/Source/VulkanDevice.cpp
+index a44b490..d64993f 100644
+--- a/Source/VulkanDevice.cpp
++++ b/Source/VulkanDevice.cpp
+@@ -1473,6 +1473,10 @@ void VulkanDevice::CreateInstance(const RgInstanceCreateInfo &info)
+     #ifdef RG_USE_SURFACE_XLIB
+         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+     #endif // RG_USE_SURFACE_XLIB
++
++    #ifdef RG_USE_SURFACE_ANDROID
++        VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
++    #endif // RG_USE_SURFACE_ANDROID
+     };
+ 
+     if (enableValidationLayer)
+@@ -1954,6 +1958,26 @@ VkSurfaceKHR VulkanDevice::GetSurfaceFromUser(VkInstance instance, const RgInsta
+ #endif // RG_USE_SURFACE_XLIB
+ 
+ 
++#ifdef RG_USE_SURFACE_ANDROID
++    if (info.pAndroidSurfaceCreateInfo != nullptr)
++    {
++        VkAndroidSurfaceCreateInfoKHR androidInfo = {};
++        androidInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
++        androidInfo.window = info.pAndroidSurfaceCreateInfo->window;
++
++        r = vkCreateAndroidSurfaceKHR(instance, &androidInfo, nullptr, &surface);
++        VK_CHECKERROR(r);
++
++        return surface;
++    }
++#else
++    if (info.pAndroidSurfaceCreateInfo != nullptr)
++    {
++        throw RgException(RG_WRONG_ARGUMENT, "pAndroidSurfaceCreateInfo is specified, but the library wasn't built with RG_USE_SURFACE_ANDROID option");
++    }
++#endif // RG_USE_SURFACE_ANDROID
++
++
+     throw RgException(RG_WRONG_ARGUMENT, "Surface info wasn't specified");
+ }
+ 
+-- 
+2.43.0
+
