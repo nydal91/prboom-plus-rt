@@ -1,0 +1,627 @@
+From 095d75424e9c9c41d81439c711489acdab615633 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 18:33:04 +0200
+Subject: [PATCH 04/11] Ray query passes: bind 4 descriptor sets instead of 9
+
+Mobile GPUs can bind few descriptor sets at once (Adreno 7xx: 8, with
+Turnip 7; Adreno 6xx and others: 4), and the path tracer needed 9, so
+pipeline layout creation would fail on Android.
+
+The small sets (TLAS, global uniform, blue noise, light sources,
+cubemaps, render cubemap) are now copied each frame into one combined
+set with vkCopyDescriptorSet; framebuffers, vertex data and bindless
+textures stay as they are. Set/binding numbers are shared through
+DESC_SET_RQ_* / BINDING_RQ_* in GenerateShaderCommon.py, and the ray
+query shaders opt in with DESC_SET_RAY_QUERY_COMBINED, which remaps
+the bindings in ShaderCommonGLSLFunc.h. Other passes are unchanged.
+
+Rendering is pixel-identical to the original ray tracing pipeline on
+lavapipe (60-frame test scene with alpha-tested, mirror and glass
+geometry), and the maxBoundDescriptorSets validation error is gone.
+---
+ Source/CubemapManager.cpp                |   2 +-
+ Source/CubemapManager.h                  |   3 +
+ Source/Generated/GenerateShaderCommon.py |  16 ++
+ Source/Generated/ShaderCommonC.h         |  11 ++
+ Source/Generated/ShaderCommonGLSL.h      |  11 ++
+ Source/PathTracer.cpp                    |  40 ++---
+ Source/PathTracer.h                      |   4 +-
+ Source/RayTracingPipeline.cpp            | 192 ++++++++++++++++++++---
+ Source/RayTracingPipeline.h              |  21 +++
+ Source/Shaders/RaygenPrimary.inl         |  20 +--
+ Source/Shaders/RtRaygenDirect.comp       |  16 +-
+ Source/Shaders/RtRaygenIndirect.comp     |  20 +--
+ Source/Shaders/ShaderCommonGLSLFunc.h    |  39 +++++
+ 13 files changed, 319 insertions(+), 76 deletions(-)
+
+diff --git a/Source/CubemapManager.cpp b/Source/CubemapManager.cpp
+index e61f02a..24051c5 100644
+--- a/Source/CubemapManager.cpp
++++ b/Source/CubemapManager.cpp
+@@ -25,7 +25,7 @@
+ #include "TextureOverrides.h"
+ #include "RgException.h"
+ 
+-constexpr uint32_t MAX_CUBEMAP_COUNT = 32;
++using RTGL1::MAX_CUBEMAP_COUNT;
+ 
+ // use albedo-alpha texture data
+ constexpr uint32_t MATERIAL_COLOR_TEXTURE_INDEX = 0;
+diff --git a/Source/CubemapManager.h b/Source/CubemapManager.h
+index 2421eef..8f28dd5 100644
+--- a/Source/CubemapManager.h
++++ b/Source/CubemapManager.h
+@@ -36,6 +36,9 @@
+ namespace RTGL1
+ {
+ 
++// Size of the cubemap descriptor array (also copied into the ray query path tracer's combined set)
++constexpr uint32_t MAX_CUBEMAP_COUNT = 32;
++
+ class CubemapManager
+ {
+ public:
+diff --git a/Source/Generated/GenerateShaderCommon.py b/Source/Generated/GenerateShaderCommon.py
+index 9713707..d9ac8a1 100644
+--- a/Source/Generated/GenerateShaderCommon.py
++++ b/Source/Generated/GenerateShaderCommon.py
+@@ -332,6 +332,22 @@ CONST = {
+     # ray query path: former raygen shaders are dispatched as compute
+     "COMPUTE_RAY_QUERY_GROUP_SIZE_X"        : 8,
+     "COMPUTE_RAY_QUERY_GROUP_SIZE_Y"        : 8,
++
++    # ray query path: descriptor sets. Mobile GPUs bind few sets
++    # (Adreno 7xx: 8, older ones 4), so small sets are merged into one
++    "DESC_SET_RQ_FRAMEBUFFERS"              : 0,
++    "DESC_SET_RQ_VERTEX_DATA"               : 1,
++    "DESC_SET_RQ_TEXTURES"                  : 2,
++    "DESC_SET_RQ_COMBINED"                  : 3,
++    "DESC_SET_RQ_COUNT"                     : 4,
++    # bindings inside DESC_SET_RQ_COMBINED
++    "BINDING_RQ_ACCELERATION_STRUCTURE_MAIN": 0,
++    "BINDING_RQ_GLOBAL_UNIFORM"             : 1,
++    "BINDING_RQ_BLUE_NOISE"                 : 2,
++    "BINDING_RQ_CUBEMAPS"                   : 3,
++    "BINDING_RQ_RENDER_CUBEMAP"             : 4,
++    # light source bindings follow, in their original order
++    "BINDING_RQ_LIGHT_SOURCES_FIRST"        : 5,
+     
+     "COMPUTE_BLOOM_UPSAMPLE_GROUP_SIZE_X"   : 16,
+     "COMPUTE_BLOOM_UPSAMPLE_GROUP_SIZE_Y"   : 16,
+diff --git a/Source/Generated/ShaderCommonC.h b/Source/Generated/ShaderCommonC.h
+index 8056428..e2aa4fe 100644
+--- a/Source/Generated/ShaderCommonC.h
++++ b/Source/Generated/ShaderCommonC.h
+@@ -110,6 +110,17 @@ namespace RTGL1
+ #define COMPUTE_COMPOSE_GROUP_SIZE_Y (16)
+ #define COMPUTE_RAY_QUERY_GROUP_SIZE_X (8)
+ #define COMPUTE_RAY_QUERY_GROUP_SIZE_Y (8)
++#define DESC_SET_RQ_FRAMEBUFFERS (0)
++#define DESC_SET_RQ_VERTEX_DATA (1)
++#define DESC_SET_RQ_TEXTURES (2)
++#define DESC_SET_RQ_COMBINED (3)
++#define DESC_SET_RQ_COUNT (4)
++#define BINDING_RQ_ACCELERATION_STRUCTURE_MAIN (0)
++#define BINDING_RQ_GLOBAL_UNIFORM (1)
++#define BINDING_RQ_BLUE_NOISE (2)
++#define BINDING_RQ_CUBEMAPS (3)
++#define BINDING_RQ_RENDER_CUBEMAP (4)
++#define BINDING_RQ_LIGHT_SOURCES_FIRST (5)
+ #define COMPUTE_BLOOM_UPSAMPLE_GROUP_SIZE_X (16)
+ #define COMPUTE_BLOOM_UPSAMPLE_GROUP_SIZE_Y (16)
+ #define COMPUTE_BLOOM_DOWNSAMPLE_GROUP_SIZE_X (16)
+diff --git a/Source/Generated/ShaderCommonGLSL.h b/Source/Generated/ShaderCommonGLSL.h
+index dd605bb..7e9645e 100644
+--- a/Source/Generated/ShaderCommonGLSL.h
++++ b/Source/Generated/ShaderCommonGLSL.h
+@@ -103,6 +103,17 @@
+ #define COMPUTE_COMPOSE_GROUP_SIZE_Y (16)
+ #define COMPUTE_RAY_QUERY_GROUP_SIZE_X (8)
+ #define COMPUTE_RAY_QUERY_GROUP_SIZE_Y (8)
++#define DESC_SET_RQ_FRAMEBUFFERS (0)
++#define DESC_SET_RQ_VERTEX_DATA (1)
++#define DESC_SET_RQ_TEXTURES (2)
++#define DESC_SET_RQ_COMBINED (3)
++#define DESC_SET_RQ_COUNT (4)
++#define BINDING_RQ_ACCELERATION_STRUCTURE_MAIN (0)
++#define BINDING_RQ_GLOBAL_UNIFORM (1)
++#define BINDING_RQ_BLUE_NOISE (2)
++#define BINDING_RQ_CUBEMAPS (3)
++#define BINDING_RQ_RENDER_CUBEMAP (4)
++#define BINDING_RQ_LIGHT_SOURCES_FIRST (5)
+ #define COMPUTE_BLOOM_UPSAMPLE_GROUP_SIZE_X (16)
+ #define COMPUTE_BLOOM_UPSAMPLE_GROUP_SIZE_Y (16)
+ #define COMPUTE_BLOOM_DOWNSAMPLE_GROUP_SIZE_X (16)
+diff --git a/Source/PathTracer.cpp b/Source/PathTracer.cpp
+index 72e9c04..ad73511 100644
+--- a/Source/PathTracer.cpp
++++ b/Source/PathTracer.cpp
+@@ -41,32 +41,20 @@ void PathTracer::Bind(
+     const std::shared_ptr<CubemapManager> &cubemapMgr,
+     const std::shared_ptr<RenderCubemap> &renderCubemap)
+ {
+-    VkDescriptorSet sets[] = {
+-        // ray tracing acceleration structures
+-        scene->GetASManager()->GetTLASDescSet(frameIndex),
+-        // storage images
+-        framebuffers->GetDescSet(frameIndex),
+-        // uniform
+-        uniform->GetDescSet(frameIndex),
+-        // vertex data
+-        scene->GetASManager()->GetBuffersDescSet(frameIndex),
+-        // textures
+-        textureMgr->GetDescSet(frameIndex),
+-        // uniform random
+-        blueNoise->GetDescSet(),
+-        // light sources
+-        scene->GetLightManager()->GetDescSet(frameIndex),
+-        // cubemaps
+-        cubemapMgr->GetDescSet(frameIndex),
+-        // dynamic cubemaps
+-        renderCubemap->GetDescSet()
+-    };
+-    static_assert(sizeof(sets) / sizeof(sets[0]) == DESC_SET_COUNT, "Change DESC_SET_COUNT");
++    // small sets are copied into one, see RayTracingPipeline::CombinedSetSources
++    RayTracingPipeline::CombinedSetSources combined = {};
++    combined.tlas           = scene->GetASManager()->GetTLASDescSet(frameIndex);
++    combined.uniform        = uniform->GetDescSet(frameIndex);
++    combined.blueNoise      = blueNoise->GetDescSet();
++    combined.lightSources   = scene->GetLightManager()->GetDescSet(frameIndex);
++    combined.cubemaps       = cubemapMgr->GetDescSet(frameIndex);
++    combined.renderCubemap  = renderCubemap->GetDescSet();
++
++    boundSets[DESC_SET_RQ_FRAMEBUFFERS] = framebuffers->GetDescSet(frameIndex);
++    boundSets[DESC_SET_RQ_VERTEX_DATA]  = scene->GetASManager()->GetBuffersDescSet(frameIndex);
++    boundSets[DESC_SET_RQ_TEXTURES]     = textureMgr->GetDescSet(frameIndex);
++    boundSets[DESC_SET_RQ_COMBINED]     = rtPipeline->UpdateCombinedDescSet(frameIndex, combined);
+ 
+-    for (uint32_t i = 0; i < DESC_SET_COUNT; i++)
+-    {
+-        boundSets[i] = sets[i];
+-    }
+     areSetsValid = true;
+ }
+ 
+@@ -76,7 +64,7 @@ void PathTracer::Dispatch(VkCommandBuffer cmd, uint32_t passIndex, uint32_t widt
+ 
+     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                             rtPipeline->GetLayout(),
+-                            0, DESC_SET_COUNT, boundSets,
++                            0, DESC_SET_RQ_COUNT, boundSets,
+                             0, nullptr);
+ 
+     rtPipeline->TraceRays(cmd, passIndex, width, height);
+diff --git a/Source/PathTracer.h b/Source/PathTracer.h
+index ed56cf3..0018e66 100644
+--- a/Source/PathTracer.h
++++ b/Source/PathTracer.h
+@@ -25,6 +25,7 @@
+ #include "GlobalUniform.h"
+ #include "Framebuffers.h"
+ #include "RenderCubemap.h"
++#include "Generated/ShaderCommonC.h"
+ 
+ namespace RTGL1
+ {
+@@ -80,8 +81,7 @@ private:
+     VkDevice device;
+     std::shared_ptr<RayTracingPipeline> rtPipeline;
+ 
+-    static constexpr uint32_t DESC_SET_COUNT = 9;
+-    VkDescriptorSet boundSets[DESC_SET_COUNT];
++    VkDescriptorSet boundSets[DESC_SET_RQ_COUNT];
+     bool areSetsValid;
+ };
+ 
+diff --git a/Source/RayTracingPipeline.cpp b/Source/RayTracingPipeline.cpp
+index 9021b18..8a4887a 100644
+--- a/Source/RayTracingPipeline.cpp
++++ b/Source/RayTracingPipeline.cpp
+@@ -25,6 +25,7 @@
+ #include "Utils.h"
+ 
+ #include <string>
++#include <vector>
+ 
+ using namespace RTGL1;
+ 
+@@ -55,6 +56,9 @@ RayTracingPipeline::RayTracingPipeline(
+     const RgInstanceCreateInfo &_rgInfo)
+ :
+     device(_device),
++    combinedSetLayout(VK_NULL_HANDLE),
++    combinedPool(VK_NULL_HANDLE),
++    combinedSets{},
+     pipelineLayout(VK_NULL_HANDLE),
+     passInfos{},
+     pipelines{},
+@@ -65,28 +69,20 @@ RayTracingPipeline::RayTracingPipeline(
+     (void)_physDevice;
+     (void)_allocator;
+ 
+-    // all set layouts to be used, the order must match the shaders' DESC_SET_* defines
+-    VkDescriptorSetLayout setLayouts[] =
+-    {
+-        // ray tracing acceleration structures
+-        _scene->GetASManager()->GetTLASDescSetLayout(),
+-        // storage images
+-        _framebuffers->GetDescSetLayout(),
+-        // uniform
+-        _uniform->GetDescSetLayout(),
+-        // vertex data
+-        _scene->GetASManager()->GetBuffersDescSetLayout(),
+-        // textures
+-        _textureMgr->GetDescSetLayout(),
+-        // uniform random
+-        _blueNoise->GetDescSetLayout(),
+-        // light sources
+-        _scene->GetLightManager()->GetDescSetLayout(),
+-        // cubemaps, for a cubemap type of skyboxes
+-        _cubemapMgr->GetDescSetLayout(),
+-        // dynamic cubemaps
+-        _renderCubemap->GetDescSetLayout()
+-    };
++    // TLAS, uniform, blue noise, light sources and cubemaps are merged into one set;
++    // their layouts are recreated in CreateCombinedDescriptors()
++    (void)_uniform;
++    (void)_blueNoise;
++    (void)_cubemapMgr;
++    (void)_renderCubemap;
++    CreateCombinedDescriptors();
++
++    // all set layouts to be used, indexed by DESC_SET_RQ_*
++    VkDescriptorSetLayout setLayouts[DESC_SET_RQ_COUNT] = {};
++    setLayouts[DESC_SET_RQ_FRAMEBUFFERS]    = _framebuffers->GetDescSetLayout();
++    setLayouts[DESC_SET_RQ_VERTEX_DATA]     = _scene->GetASManager()->GetBuffersDescSetLayout();
++    setLayouts[DESC_SET_RQ_TEXTURES]        = _textureMgr->GetDescSetLayout();
++    setLayouts[DESC_SET_RQ_COMBINED]        = combinedSetLayout;
+ 
+     CreatePipelineLayout(setLayouts, sizeof(setLayouts) / sizeof(setLayouts[0]));
+ 
+@@ -111,6 +107,158 @@ RayTracingPipeline::~RayTracingPipeline()
+ {
+     DestroyPipelines();
+     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
++    vkDestroyDescriptorPool(device, combinedPool, nullptr);
++    vkDestroyDescriptorSetLayout(device, combinedSetLayout, nullptr);
++}
++
++namespace
++{
++
++// Light source bindings are copied in their original order
++constexpr uint32_t LIGHT_SOURCE_BINDINGS[] =
++{
++    BINDING_LIGHT_SOURCES_SPHERICAL,
++    BINDING_LIGHT_SOURCES_SPHERICAL_PREV,
++    BINDING_LIGHT_SOURCES_POLYGONAL,
++    BINDING_LIGHT_SOURCES_POLYGONAL_PREV,
++    BINDING_LIGHT_SOURCES_SPH_MATCH_PREV,
++    BINDING_LIGHT_SOURCES_POLY_MATCH_PREV,
++    BINDING_PLAIN_LIGHT_LIST_POLY,
++    BINDING_SECTOR_TO_LIGHT_LIST_REGION_POLY,
++    BINDING_PLAIN_LIGHT_LIST_SPH,
++    BINDING_SECTOR_TO_LIGHT_LIST_REGION_SPH,
++};
++constexpr uint32_t LIGHT_SOURCE_BINDING_COUNT = std::size(LIGHT_SOURCE_BINDINGS);
++
++// ShaderCommonGLSLFunc.h remaps light bindings to BINDING_RQ_LIGHT_SOURCES_FIRST + i
++constexpr bool AreLightBindingsSequential()
++{
++    for (uint32_t i = 0; i < LIGHT_SOURCE_BINDING_COUNT; i++)
++    {
++        if (LIGHT_SOURCE_BINDINGS[i] != i)
++        {
++            return false;
++        }
++    }
++    return true;
++}
++static_assert(AreLightBindingsSequential(), "Light source bindings must be 0..N-1, update ShaderCommonGLSLFunc.h");
++static_assert(BINDING_RQ_LIGHT_SOURCES_FIRST > BINDING_RQ_ACCELERATION_STRUCTURE_MAIN &&
++              BINDING_RQ_LIGHT_SOURCES_FIRST > BINDING_RQ_GLOBAL_UNIFORM &&
++              BINDING_RQ_LIGHT_SOURCES_FIRST > BINDING_RQ_BLUE_NOISE &&
++              BINDING_RQ_LIGHT_SOURCES_FIRST > BINDING_RQ_CUBEMAPS &&
++              BINDING_RQ_LIGHT_SOURCES_FIRST > BINDING_RQ_RENDER_CUBEMAP,
++              "Light source bindings must be last in the combined set");
++
++}
++
++void RayTracingPipeline::CreateCombinedDescriptors()
++{
++    // Types and counts must match the source sets' layouts:
++    // ASManager (TLAS), GlobalUniform, BlueNoise, CubemapManager, RenderCubemap, LightManager
++    std::vector<VkDescriptorSetLayoutBinding> bindings;
++
++    auto add = [&bindings] (uint32_t binding, VkDescriptorType type, uint32_t count)
++    {
++        VkDescriptorSetLayoutBinding b = {};
++        b.binding = binding;
++        b.descriptorType = type;
++        b.descriptorCount = count;
++        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
++        bindings.push_back(b);
++    };
++
++    add(BINDING_RQ_ACCELERATION_STRUCTURE_MAIN, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1);
++    add(BINDING_RQ_GLOBAL_UNIFORM,              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1);
++    add(BINDING_RQ_BLUE_NOISE,                  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,              1);
++    add(BINDING_RQ_CUBEMAPS,                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     MAX_CUBEMAP_COUNT);
++    add(BINDING_RQ_RENDER_CUBEMAP,              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1);
++    for (uint32_t i = 0; i < LIGHT_SOURCE_BINDING_COUNT; i++)
++    {
++        add(BINDING_RQ_LIGHT_SOURCES_FIRST + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1);
++    }
++
++    VkDescriptorSetLayoutCreateInfo layoutInfo = {};
++    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
++    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
++    layoutInfo.pBindings = bindings.data();
++
++    VkResult r = vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &combinedSetLayout);
++    VK_CHECKERROR(r);
++
++    SET_DEBUG_NAME(device, combinedSetLayout, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, "Ray query combined Desc set layout");
++
++    VkDescriptorPoolSize poolSizes[] =
++    {
++        { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,    1 * MAX_FRAMES_IN_FLIGHT },
++        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                1 * MAX_FRAMES_IN_FLIGHT },
++        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,                 1 * MAX_FRAMES_IN_FLIGHT },
++        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,        (MAX_CUBEMAP_COUNT + 1) * MAX_FRAMES_IN_FLIGHT },
++        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,                LIGHT_SOURCE_BINDING_COUNT * MAX_FRAMES_IN_FLIGHT },
++    };
++
++    VkDescriptorPoolCreateInfo poolInfo = {};
++    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
++    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
++    poolInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
++    poolInfo.pPoolSizes = poolSizes;
++
++    r = vkCreateDescriptorPool(device, &poolInfo, nullptr, &combinedPool);
++    VK_CHECKERROR(r);
++
++    SET_DEBUG_NAME(device, combinedPool, VK_OBJECT_TYPE_DESCRIPTOR_POOL, "Ray query combined Desc pool");
++
++    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
++    {
++        VkDescriptorSetAllocateInfo allocInfo = {};
++        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
++        allocInfo.descriptorPool = combinedPool;
++        allocInfo.descriptorSetCount = 1;
++        allocInfo.pSetLayouts = &combinedSetLayout;
++
++        r = vkAllocateDescriptorSets(device, &allocInfo, &combinedSets[i]);
++        VK_CHECKERROR(r);
++
++        SET_DEBUG_NAME(device, combinedSets[i], VK_OBJECT_TYPE_DESCRIPTOR_SET, "Ray query combined Desc set");
++    }
++}
++
++VkDescriptorSet RayTracingPipeline::UpdateCombinedDescSet(uint32_t frameIndex, const CombinedSetSources &src)
++{
++    assert(frameIndex < MAX_FRAMES_IN_FLIGHT);
++    VkDescriptorSet dst = combinedSets[frameIndex];
++
++    std::vector<VkCopyDescriptorSet> copies;
++    copies.reserve(5 + LIGHT_SOURCE_BINDING_COUNT);
++
++    auto copy = [&copies, dst] (VkDescriptorSet srcSet, uint32_t srcBinding, uint32_t dstBinding, uint32_t count)
++    {
++        VkCopyDescriptorSet c = {};
++        c.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
++        c.srcSet = srcSet;
++        c.srcBinding = srcBinding;
++        c.srcArrayElement = 0;
++        c.dstSet = dst;
++        c.dstBinding = dstBinding;
++        c.dstArrayElement = 0;
++        c.descriptorCount = count;
++        copies.push_back(c);
++    };
++
++    // original bindings: see the source managers; remapped ones: BINDING_RQ_*
++    copy(src.tlas,          BINDING_ACCELERATION_STRUCTURE_MAIN,    BINDING_RQ_ACCELERATION_STRUCTURE_MAIN, 1);
++    copy(src.uniform,       BINDING_GLOBAL_UNIFORM,                 BINDING_RQ_GLOBAL_UNIFORM,              1);
++    copy(src.blueNoise,     BINDING_BLUE_NOISE,                     BINDING_RQ_BLUE_NOISE,                  1);
++    copy(src.cubemaps,      BINDING_CUBEMAPS,                       BINDING_RQ_CUBEMAPS,                    MAX_CUBEMAP_COUNT);
++    copy(src.renderCubemap, BINDING_RENDER_CUBEMAP,                 BINDING_RQ_RENDER_CUBEMAP,              1);
++    for (uint32_t i = 0; i < LIGHT_SOURCE_BINDING_COUNT; i++)
++    {
++        copy(src.lightSources, LIGHT_SOURCE_BINDINGS[i], BINDING_RQ_LIGHT_SOURCES_FIRST + i, 1);
++    }
++
++    vkUpdateDescriptorSets(device, 0, nullptr, static_cast<uint32_t>(copies.size()), copies.data());
++
++    return dst;
+ }
+ 
+ void RayTracingPipeline::CreatePipelineLayout(const VkDescriptorSetLayout *pSetLayouts, uint32_t setLayoutCount)
+diff --git a/Source/RayTracingPipeline.h b/Source/RayTracingPipeline.h
+index 3766040..a167fcf 100644
+--- a/Source/RayTracingPipeline.h
++++ b/Source/RayTracingPipeline.h
+@@ -60,6 +60,22 @@ public:
+     RayTracingPipeline& operator=(const RayTracingPipeline& other) = delete;
+     RayTracingPipeline& operator=(RayTracingPipeline&& other) noexcept = delete;
+ 
++    // Descriptor sets that are merged into one set for the ray query passes,
++    // as mobile GPUs can bind few sets at once (maxBoundDescriptorSets: Adreno 7xx 8, older 4).
++    struct CombinedSetSources
++    {
++        VkDescriptorSet tlas;
++        VkDescriptorSet uniform;
++        VkDescriptorSet blueNoise;
++        VkDescriptorSet lightSources;
++        VkDescriptorSet cubemaps;
++        VkDescriptorSet renderCubemap;
++    };
++
++    // Copy the current descriptors of the sources into this frame's combined set.
++    // Must be called each frame before the set is bound.
++    VkDescriptorSet UpdateCombinedDescSet(uint32_t frameIndex, const CombinedSetSources &sources);
++
+     // Bind the pass's compute pipeline, push the launch size and dispatch
+     // enough workgroups to cover width x height.
+     // Descriptor sets must be bound to VK_PIPELINE_BIND_POINT_COMPUTE with GetLayout() beforehand.
+@@ -70,6 +86,7 @@ public:
+     void OnShaderReload(const ShaderManager *shaderManager) override;
+ 
+ private:
++    void CreateCombinedDescriptors();
+     void CreatePipelineLayout(const VkDescriptorSetLayout *pSetLayouts, uint32_t setLayoutCount);
+     void CreatePipelines(const ShaderManager *shaderManager);
+     void DestroyPipelines();
+@@ -88,6 +105,10 @@ private:
+ private:
+     VkDevice device;
+ 
++    VkDescriptorSetLayout combinedSetLayout;
++    VkDescriptorPool combinedPool;
++    VkDescriptorSet combinedSets[MAX_FRAMES_IN_FLIGHT];
++
+     VkPipelineLayout pipelineLayout;
+     std::array<PassInfo, PASS_COUNT> passInfos;
+     std::array<VkPipeline, PASS_COUNT> pipelines;
+diff --git a/Source/Shaders/RaygenPrimary.inl b/Source/Shaders/RaygenPrimary.inl
+index 4023417..1d068ee 100644
+--- a/Source/Shaders/RaygenPrimary.inl
++++ b/Source/Shaders/RaygenPrimary.inl
+@@ -40,15 +40,17 @@
+ 
+ 
+ 
+-#define DESC_SET_TLAS 0
+-#define DESC_SET_FRAMEBUFFERS 1
+-#define DESC_SET_GLOBAL_UNIFORM 2
+-#define DESC_SET_VERTEX_DATA 3
+-#define DESC_SET_TEXTURES 4
+-#define DESC_SET_RANDOM 5
+-#define DESC_SET_LIGHT_SOURCES 6
+-#define DESC_SET_CUBEMAPS 7
+-#define DESC_SET_RENDER_CUBEMAP 8
++// ray query version: 4 descriptor sets, see DESC_SET_RQ_* and BINDING_RQ_*
++#define DESC_SET_RAY_QUERY_COMBINED
++#define DESC_SET_TLAS DESC_SET_RQ_COMBINED
++#define DESC_SET_FRAMEBUFFERS DESC_SET_RQ_FRAMEBUFFERS
++#define DESC_SET_GLOBAL_UNIFORM DESC_SET_RQ_COMBINED
++#define DESC_SET_VERTEX_DATA DESC_SET_RQ_VERTEX_DATA
++#define DESC_SET_TEXTURES DESC_SET_RQ_TEXTURES
++#define DESC_SET_RANDOM DESC_SET_RQ_COMBINED
++#define DESC_SET_LIGHT_SOURCES DESC_SET_RQ_COMBINED
++#define DESC_SET_CUBEMAPS DESC_SET_RQ_COMBINED
++#define DESC_SET_RENDER_CUBEMAP DESC_SET_RQ_COMBINED
+ #include "RaygenCommon.h"
+ 
+ vec3 getRayDir(vec2 inUV)
+diff --git a/Source/Shaders/RtRaygenDirect.comp b/Source/Shaders/RtRaygenDirect.comp
+index bc89ff7..874d8c1 100644
+--- a/Source/Shaders/RtRaygenDirect.comp
++++ b/Source/Shaders/RtRaygenDirect.comp
+@@ -23,13 +23,15 @@
+ // don't need albedo for direct illumination
+ #define MATERIAL_MAX_ALBEDO_LAYERS 0
+ 
+-#define DESC_SET_TLAS 0
+-#define DESC_SET_FRAMEBUFFERS 1
+-#define DESC_SET_GLOBAL_UNIFORM 2
+-#define DESC_SET_VERTEX_DATA 3
+-#define DESC_SET_TEXTURES 4
+-#define DESC_SET_RANDOM 5
+-#define DESC_SET_LIGHT_SOURCES 6
++// ray query version: 4 descriptor sets, see DESC_SET_RQ_* and BINDING_RQ_*
++#define DESC_SET_RAY_QUERY_COMBINED
++#define DESC_SET_TLAS DESC_SET_RQ_COMBINED
++#define DESC_SET_FRAMEBUFFERS DESC_SET_RQ_FRAMEBUFFERS
++#define DESC_SET_GLOBAL_UNIFORM DESC_SET_RQ_COMBINED
++#define DESC_SET_VERTEX_DATA DESC_SET_RQ_VERTEX_DATA
++#define DESC_SET_TEXTURES DESC_SET_RQ_TEXTURES
++#define DESC_SET_RANDOM DESC_SET_RQ_COMBINED
++#define DESC_SET_LIGHT_SOURCES DESC_SET_RQ_COMBINED
+ #define RAYGEN_SHADOW_PAYLOAD
+ #define RAYGEN_COMMON_DISTANCE_TO_LIGHT
+ #include "RaygenCommon.h"
+diff --git a/Source/Shaders/RtRaygenIndirect.comp b/Source/Shaders/RtRaygenIndirect.comp
+index 372e6c6..6779966 100644
+--- a/Source/Shaders/RtRaygenIndirect.comp
++++ b/Source/Shaders/RtRaygenIndirect.comp
+@@ -23,15 +23,17 @@
+ layout (constant_id = 0) const uint maxAlbedoLayerCount = 0;
+ #define MATERIAL_MAX_ALBEDO_LAYERS maxAlbedoLayerCount
+ 
+-#define DESC_SET_TLAS 0
+-#define DESC_SET_FRAMEBUFFERS 1
+-#define DESC_SET_GLOBAL_UNIFORM 2
+-#define DESC_SET_VERTEX_DATA 3
+-#define DESC_SET_TEXTURES 4
+-#define DESC_SET_RANDOM 5
+-#define DESC_SET_LIGHT_SOURCES 6
+-#define DESC_SET_CUBEMAPS 7
+-#define DESC_SET_RENDER_CUBEMAP 8
++// ray query version: 4 descriptor sets, see DESC_SET_RQ_* and BINDING_RQ_*
++#define DESC_SET_RAY_QUERY_COMBINED
++#define DESC_SET_TLAS DESC_SET_RQ_COMBINED
++#define DESC_SET_FRAMEBUFFERS DESC_SET_RQ_FRAMEBUFFERS
++#define DESC_SET_GLOBAL_UNIFORM DESC_SET_RQ_COMBINED
++#define DESC_SET_VERTEX_DATA DESC_SET_RQ_VERTEX_DATA
++#define DESC_SET_TEXTURES DESC_SET_RQ_TEXTURES
++#define DESC_SET_RANDOM DESC_SET_RQ_COMBINED
++#define DESC_SET_LIGHT_SOURCES DESC_SET_RQ_COMBINED
++#define DESC_SET_CUBEMAPS DESC_SET_RQ_COMBINED
++#define DESC_SET_RENDER_CUBEMAP DESC_SET_RQ_COMBINED
+ #define RAYGEN_SHADOW_PAYLOAD
+ #define RAYGEN_COMMON_ONLY_DIFFUSE
+ #define RAYGEN_ALLOW_FIREFLIES_CLAMP
+diff --git a/Source/Shaders/ShaderCommonGLSLFunc.h b/Source/Shaders/ShaderCommonGLSLFunc.h
+index e3167b7..f38240f 100644
+--- a/Source/Shaders/ShaderCommonGLSLFunc.h
++++ b/Source/Shaders/ShaderCommonGLSLFunc.h
+@@ -23,6 +23,45 @@
+ 
+ #include "Utils.h"
+ #include "ShaderCommonGLSL.h"
++
++#ifdef DESC_SET_RAY_QUERY_COMBINED
++    // Ray query path tracing passes: the TLAS, global uniform, blue noise, light sources
++    // and cubemaps are copied into one descriptor set (DESC_SET_RQ_COMBINED), as mobile GPUs
++    // can bind few sets at once. Remap their bindings to that set's layout,
++    // which is created in RayTracingPipeline.cpp.
++    #undef  BINDING_ACCELERATION_STRUCTURE_MAIN
++    #define BINDING_ACCELERATION_STRUCTURE_MAIN         BINDING_RQ_ACCELERATION_STRUCTURE_MAIN
++    #undef  BINDING_GLOBAL_UNIFORM
++    #define BINDING_GLOBAL_UNIFORM                      BINDING_RQ_GLOBAL_UNIFORM
++    #undef  BINDING_BLUE_NOISE
++    #define BINDING_BLUE_NOISE                          BINDING_RQ_BLUE_NOISE
++    #undef  BINDING_CUBEMAPS
++    #define BINDING_CUBEMAPS                            BINDING_RQ_CUBEMAPS
++    #undef  BINDING_RENDER_CUBEMAP
++    #define BINDING_RENDER_CUBEMAP                      BINDING_RQ_RENDER_CUBEMAP
++    // light sources keep their order (static_assert-ed on the C++ side)
++    #undef  BINDING_LIGHT_SOURCES_SPHERICAL
++    #define BINDING_LIGHT_SOURCES_SPHERICAL             (BINDING_RQ_LIGHT_SOURCES_FIRST + 0)
++    #undef  BINDING_LIGHT_SOURCES_SPHERICAL_PREV
++    #define BINDING_LIGHT_SOURCES_SPHERICAL_PREV        (BINDING_RQ_LIGHT_SOURCES_FIRST + 1)
++    #undef  BINDING_LIGHT_SOURCES_POLYGONAL
++    #define BINDING_LIGHT_SOURCES_POLYGONAL             (BINDING_RQ_LIGHT_SOURCES_FIRST + 2)
++    #undef  BINDING_LIGHT_SOURCES_POLYGONAL_PREV
++    #define BINDING_LIGHT_SOURCES_POLYGONAL_PREV        (BINDING_RQ_LIGHT_SOURCES_FIRST + 3)
++    #undef  BINDING_LIGHT_SOURCES_SPH_MATCH_PREV
++    #define BINDING_LIGHT_SOURCES_SPH_MATCH_PREV        (BINDING_RQ_LIGHT_SOURCES_FIRST + 4)
++    #undef  BINDING_LIGHT_SOURCES_POLY_MATCH_PREV
++    #define BINDING_LIGHT_SOURCES_POLY_MATCH_PREV       (BINDING_RQ_LIGHT_SOURCES_FIRST + 5)
++    #undef  BINDING_PLAIN_LIGHT_LIST_POLY
++    #define BINDING_PLAIN_LIGHT_LIST_POLY               (BINDING_RQ_LIGHT_SOURCES_FIRST + 6)
++    #undef  BINDING_SECTOR_TO_LIGHT_LIST_REGION_POLY
++    #define BINDING_SECTOR_TO_LIGHT_LIST_REGION_POLY    (BINDING_RQ_LIGHT_SOURCES_FIRST + 7)
++    #undef  BINDING_PLAIN_LIGHT_LIST_SPH
++    #define BINDING_PLAIN_LIGHT_LIST_SPH                (BINDING_RQ_LIGHT_SOURCES_FIRST + 8)
++    #undef  BINDING_SECTOR_TO_LIGHT_LIST_REGION_SPH
++    #define BINDING_SECTOR_TO_LIGHT_LIST_REGION_SPH     (BINDING_RQ_LIGHT_SOURCES_FIRST + 9)
++#endif // DESC_SET_RAY_QUERY_COMBINED
++
+ #include "Structs.h"
+ #include "BRDF.h"
+ 
+-- 
+2.43.0
+

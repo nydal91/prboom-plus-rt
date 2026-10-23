@@ -374,7 +374,11 @@ const char *I_DoomExeDir(void)
 
 const char *I_GetTempDir(void)
 {
+#ifdef __ANDROID__
+  return I_DoomExeDir(); // no /tmp on Android
+#else
   return "/tmp";
+#endif
 }
 
 #endif

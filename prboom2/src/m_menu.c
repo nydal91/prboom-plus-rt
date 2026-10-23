@@ -36,6 +36,7 @@
  *-----------------------------------------------------------------------------*/
 
 #ifdef HAVE_CONFIG_H
+#include "SDL/i_gamepad.h"
 #include "config.h"
 #endif
 
@@ -46,6 +47,8 @@
 #include "doomstat.h"
 #include "dstrings.h"
 #include "d_main.h"
+#include <math.h>
+#include <SDL.h>
 #include "v_video.h"
 #include "w_wad.h"
 #include "r_main.h"
@@ -4018,6 +4021,8 @@ typedef enum
   gfxset_crtinterlacing,
   gfxset_muzzleflash,
   gfxset_classicflashlight,
+  gfxset_showfps,
+  gfxset_rumble,
   gfxset_hudstyle,
 #if RT_SEPARATE_HUD_SCALE
   gfxset_statusbarscale,
@@ -4026,6 +4031,12 @@ typedef enum
   gfxset_hudsize,
   gfxset_end
 } gfxset_e;
+// a short buzz when rumble is switched on, so it can be felt
+static void M_RumbleTest(void)
+{
+  I_Gamepad_Rumble(0.6f, 0.6f, 250);
+}
+
 setup_menu_t RT_GraphicsSettings[] =
 {
   {"Video mode",  S_CHOICE, m_null, RT_X, RT_Y + 0 * 8, {"videomode"}, 0, 0, M_ChangeVideoMode, RT_simpler_videomodes},
@@ -4047,13 +4058,15 @@ setup_menu_t RT_GraphicsSettings[] =
   {"CRT Interlacing", S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+2) * 8, {"rt_crt_interlacing"}, 0, 0, NULL, RT_options_crt_interlacing },
   {"Muzzle flash",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+3) * 8, {"rt_muzzleflash_intensity"}, 0, 0, NULL, RT_options_muzzleflash_intensity },
   {"Flashlight",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+4) * 8, {"rt_classic_flashlight"}, 0, 0, NULL, RT_options_classic_flashlight },
+  {"Show FPS",    S_YESNO,   m_null, RT_X, RT_Y + (RT_U+5) * 8, {"show_fps"}},
+  {"Controller rumble", S_YESNO, m_null, RT_X, RT_Y + (RT_U+6) * 8, {"gamepad_rumble"}, 0, 0, M_RumbleTest},
 
-  {"HUD style",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+6) * 8, {"rt_hud_style"}, 0, 0, M_RT_ApplyHUD, RT_options_hud_style},
+  {"HUD style",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+7) * 8, {"rt_hud_style"}, 0, 0, M_RT_ApplyHUD, RT_options_hud_style},
 #if RT_SEPARATE_HUD_SCALE
-  {"Classic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+7) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
-  {"Minimalistic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+8) * 8, {"rt_hud_scale"}, 0, 0, NULL, RT_options_hud_scale },
+  {"Classic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+8) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
+  {"Minimalistic HUD scale",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+9) * 8, {"rt_hud_scale"}, 0, 0, NULL, RT_options_hud_scale },
 #else
-  {"HUD size",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+7) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
+  {"HUD size",  S_CHOICE,  m_null, RT_X, RT_Y + (RT_U+8) * 8, {"rt_statusbar_scale"}, 0, 0, NULL, RT_options_statusbar_scale },
 #endif
 
   {0,S_SKIP | S_END,m_null}
@@ -7172,3 +7185,180 @@ void M_Init(void)
 // End of General Routines
 //
 /////////////////////////////////////////////////////////////////////////////
+
+#if defined(__ANDROID__) || defined(PRBOOM_TOUCH_CONTROLS)
+//
+// M_TouchTap
+//
+// Touch screens: a tap at (nx, ny), normalized window coordinates, on a menu
+// item selects it. Returns the key the caller should press (enter to activate,
+// left/right on a slider), 0 if the tap only moved the cursor, or -1 if the
+// tap wasn't on the menu.
+//
+int M_TouchTap(float nx, float ny)
+{
+  const stretch_param_t *sp = &stretch_params[0];
+  float vx, vy;
+
+  if (!menuactive || messageToPrint || !sp->video || sp->video->width <= 0 || sp->video->height <= 0)
+  {
+    return -1;
+  }
+
+  // window -> the 320x200 menu space (as drawn with VPT_STRETCH)
+  vx = (nx * SCREENWIDTH - sp->deltax1) * 320.0f / sp->video->width;
+  vy = (ny * SCREENHEIGHT - sp->deltay1) * 200.0f / sp->video->height;
+
+  if (saveStringEnter)
+  {
+    // typing a save name (it starts with the map name): a tap saves
+    return key_menu_enter;
+  }
+
+  if (setup_active)
+  {
+    int i, best = -1;
+    float bestdist = 7.0f;
+
+    if (setup_gather || colorbox_active || default_verify || !current_setup_menu)
+    {
+      return -1;
+    }
+    if (setup_select)
+    {
+      return key_menu_enter;
+    }
+
+    for (i = 0; !(current_setup_menu[i].m_flags & S_END); i++)
+    {
+      const setup_menu_t *s = &current_setup_menu[i];
+      float d;
+
+      if (s->m_flags & S_SKIP)
+      {
+        continue;
+      }
+      d = (float)fabs(vy - (s->m_y + 4));
+      if (d < bestdist)
+      {
+        bestdist = d;
+        best = i;
+      }
+    }
+    if (best < 0)
+    {
+      return -1;
+    }
+    if (best == set_menu_itemon)
+    {
+      // second tap on the highlighted row changes it
+      return key_menu_enter;
+    }
+    current_setup_menu[set_menu_itemon].m_flags &= ~(S_HILITE | S_SELECT);
+    set_menu_itemon = best;
+    M_SelectDone(&current_setup_menu[best]);
+    return 0;
+  }
+
+  if (currentMenu && currentMenu->numitems > 0)
+  {
+    int i;
+    int x = currentMenu->x;
+
+    if (vx < x + SKULLXOFF - 8 || vx > x + 230)
+    {
+      return -1;
+    }
+
+    i = (int)floorf((vy - (currentMenu->y - 3)) / LINEHEIGHT);
+    if (i < 0 || i >= currentMenu->numitems)
+    {
+      // one-item screens (help pages): a tap anywhere goes on
+      return currentMenu->numitems == 1 ? key_menu_enter : -1;
+    }
+
+    // the row under a slider belongs to the slider
+    if (currentMenu->menuitems[i].status == -1 && i > 0 && currentMenu->menuitems[i - 1].status == 2)
+    {
+      i--;
+    }
+    if (currentMenu->menuitems[i].status == -1)
+    {
+      return 0;
+    }
+
+    if (itemOn != i)
+    {
+      itemOn = i;
+      S_StartSound(NULL, sfx_pstop);
+    }
+
+    if (currentMenu->menuitems[i].status == 2)
+    {
+      // slider: tap left or right of its middle
+      return vx < x + 8 + 64 ? key_menu_left : key_menu_right;
+    }
+    return key_menu_enter;
+  }
+
+  return -1;
+}
+#endif
+
+//
+// M_DrawFPS
+//
+// Frame rate counter in the top right corner ("Show FPS" in Display Options).
+//
+int show_fps = 0;
+
+#if defined(__ANDROID__) || defined(PRBOOM_TOUCH_CONTROLS)
+#define FPS_Y 40   // below the top row of touch buttons
+#else
+#define FPS_Y 2
+#endif
+
+void M_DrawFPS(void)
+{
+  static unsigned int last_tick = 0, frames = 0, fps = 0;
+  unsigned int tick = SDL_GetTicks();
+  char text[32];
+  const char *c;
+  int width = 0, x;
+
+  frames++;
+  if (tick - last_tick >= 500)
+  {
+    fps = (frames * 1000 + (tick - last_tick) / 2) / (tick - last_tick);
+    frames = 0;
+    last_tick = tick;
+  }
+
+  if (!show_fps || !hu_font[0].lumpnum)
+  {
+    return;
+  }
+
+  snprintf(text, sizeof(text), "%u FPS", fps);
+  for (c = text; *c; c++)
+  {
+    int i = toupper(*c) - HU_FONTSTART;
+    width += (i < 0 || i >= HU_FONTSIZE) ? 4 : hu_font[i].width;
+  }
+
+  // right aligned on the real screen edge, under the touch buttons on phones
+  x = 320 - 4 - width;
+  for (c = text; *c; c++)
+  {
+    int i = toupper(*c) - HU_FONTSTART;
+    if (i < 0 || i >= HU_FONTSIZE)
+    {
+      x += 4;
+      continue;
+    }
+    V_DrawNumPatch(x, FPS_Y, 0, hu_font[i].lumpnum,
+                   fps >= 50 ? CR_GREEN : fps >= 30 ? CR_GOLD : CR_RED,
+                   VPT_STRETCH | VPT_ALIGN_RIGHT_TOP | VPT_TRANS);
+    x += hu_font[i].width;
+  }
+}

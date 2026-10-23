@@ -24,6 +24,8 @@
  *---------------------------------------------------------------------
  */
 
+#include "r_state.h"
+#include "w_wad.h"
 #include "rt_main.h"
 
 #include "doomstat.h"
@@ -300,13 +302,49 @@ static rt_map_metainfo_t *GetMapMetaInfo(int episode, int map)
 }
 
 
+#ifndef RT_DEFAULT_SECTOR_LIGHT_WEIGHT
+  #define RT_DEFAULT_SECTOR_LIGHT_WEIGHT 1.0f
+#endif
+
+// The hand-made lights are for the original maps only: not for a map that a
+// PWAD (custom level) puts in the same slot, nor for Freedoom's maps, which
+// share the slot names but not the layout.
+static dboolean IsOriginalMap(const rt_map_metainfo_t *mp)
+{
+  int lump = W_CheckNumForName(MAPNAME(gameepisode, gamemap));
+
+  if (lump < 0 || lumpinfo[lump].source != source_iwad)
+  {
+    return false;
+  }
+  // Freedoom IWADs carry a FREEDOOM lump
+  if (W_CheckNumForName("FREEDOOM") >= 0)
+  {
+    return false;
+  }
+  // the data may list a few extra sectors (E1M1), never fewer
+  return mp->sectors != NULL && numsectors <= mp->sectorcount;
+}
+
 dboolean RT_GetSectorLightLevelWeight(int sectornum, float *out_weight, RgFloat3D *out_color)
 {
   const rt_map_metainfo_t *mp = GetMapMetaInfo(gameepisode, gamemap);
 
+  if (mp != NULL && !IsOriginalMap(mp))
+  {
+    mp = NULL;
+  }
+
   if (mp == NULL)
   {
-    return false;
+    // No hand-made metainfo for this map (e.g. Freedoom, PWADs, or the release's
+    // ovrd/map_metainfo_*.txt is missing): light every sector from its own light
+    // level, which the caller multiplies in, so dark sectors stay dark.
+    *out_weight = RT_DEFAULT_SECTOR_LIGHT_WEIGHT;
+    out_color->data[0] = 1.0f;
+    out_color->data[1] = 1.0f;
+    out_color->data[2] = 1.0f;
+    return true;
   }
 
   if (mp->sectors == NULL || sectornum >= mp->sectorcount)

@@ -46,9 +46,13 @@ rtmain_t rtmain = { 0 };
 static RgBool32 frame_started_guard = 0;
 
 
+// last message from RTGL1, to explain an init failure in the error dialog
+static char rt_last_message[512];
+
 static void RT_Print(const char *pMessage, void *pUserData)
 {
   lprintf(LO_ERROR, "%s\n", pMessage);
+  snprintf(rt_last_message, sizeof(rt_last_message), "%s", pMessage);
 }
 
 
@@ -63,6 +67,11 @@ void RT_Init()
   {
     .hinstance = wmInfo.info.win.hinstance,
     .hwnd = wmInfo.info.win.window
+  };
+#elif defined(__ANDROID__)
+  RgAndroidSurfaceCreateInfo androidInfo =
+  {
+    .window = wmInfo.info.android.window
   };
 #else
   RgXlibSurfaceCreateInfo x11Info =
@@ -79,6 +88,8 @@ void RT_Init()
 
   #if WIN32
     .pWin32SurfaceInfo = &win32Info,
+  #elif defined(__ANDROID__)
+    .pAndroidSurfaceCreateInfo = &androidInfo,
   #else
     .pXlibSurfaceCreateInfo = &x11Info,
   #endif
@@ -124,7 +135,7 @@ void RT_Init()
   RgResult r = rgCreateInstance(&info, &rtmain.instance);
   if (r != RG_SUCCESS)
   {
-    I_Error("Can't initialize ray tracing engine: %s", rgGetResultDescription(r));
+    I_Error("Can't initialize ray tracing engine: %s\n\n%s", rgGetResultDescription(r), rt_last_message);
     return;
   }
 
@@ -344,8 +355,45 @@ static void NormalizeRTSettings(rt_settings_t *settings)
 }
 
 
+#ifdef __ANDROID__
+static dboolean android_window_changed = false;
+
+void RT_OnAndroidWindowChanged(void)
+{
+  android_window_changed = true;
+}
+
+static void ApplyAndroidWindowChange(void)
+{
+  SDL_SysWMinfo wmInfo;
+
+  if (!android_window_changed || rtmain.instance == NULL)
+  {
+    return;
+  }
+  android_window_changed = false;
+
+  SDL_VERSION(&wmInfo.version);
+  if (!SDL_GetWindowWMInfo(sdl_window, &wmInfo) || wmInfo.info.android.window == NULL)
+  {
+    lprintf(LO_WARN, "RT: no Android window to recreate the surface with\n");
+    return;
+  }
+
+  RgResult r = rgSetAndroidWindow(rtmain.instance, wmInfo.info.android.window);
+  if (r != RG_SUCCESS)
+  {
+    I_Error("Can't recreate the ray tracing surface: %s\n\n%s", rgGetResultDescription(r), rt_last_message);
+  }
+}
+#endif
+
 void RT_StartFrame(void)
 {
+#ifdef __ANDROID__
+  ApplyAndroidWindowChange();
+#endif
+
   RgStartFrameInfo info =
   {
     .requestRasterizedSkyGeometryReuse = rtmain.was_new_sky ? false : true,

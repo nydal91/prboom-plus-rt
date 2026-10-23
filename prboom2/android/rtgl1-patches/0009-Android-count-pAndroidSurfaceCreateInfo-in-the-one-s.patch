@@ -1,0 +1,32 @@
+From c9e4630d2c7e2b98b073a75d16b5ca8cb5440e07 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 20:13:49 +0200
+Subject: [PATCH 09/11] Android: count pAndroidSurfaceCreateInfo in the
+ one-surface check
+
+rgCreateInstance rejected Android with RG_WRONG_ARGUMENT ('Exactly one of
+the surface infos must be not null'), as the check didn't include it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K7ddVeaJCm7c4L64HWexay
+---
+ Source/VulkanDevice.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Source/VulkanDevice.cpp b/Source/VulkanDevice.cpp
+index d64993f..87936ad 100644
+--- a/Source/VulkanDevice.cpp
++++ b/Source/VulkanDevice.cpp
+@@ -2024,7 +2024,8 @@ void RTGL1::VulkanDevice::ValidateCreateInfo(const RgInstanceCreateInfo *pInfo)
+             !!pInfo->pMetalSurfaceCreateInfo +
+             !!pInfo->pWaylandSurfaceCreateInfo +
+             !!pInfo->pXcbSurfaceCreateInfo +
+-            !!pInfo->pXlibSurfaceCreateInfo;
++            !!pInfo->pXlibSurfaceCreateInfo +
++            !!pInfo->pAndroidSurfaceCreateInfo;
+ 
+         if (count != 1)
+         {
+-- 
+2.43.0
+

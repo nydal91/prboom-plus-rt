@@ -35,6 +35,9 @@
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
+#ifdef __ANDROID__
+#include <SDL.h>
+#endif
 #endif
 #ifdef _MSC_VER
 #include <io.h>
@@ -105,6 +108,22 @@ void I_Error(const char *error, ...)
   doom_vsnprintf(errmsg,sizeof(errmsg),error,argptr);
   va_end(argptr);
   lprintf(LO_ERROR, "%s\n", errmsg);
+#ifdef __ANDROID__
+  {
+    // shown by the launcher on the next start, and right now in a dialog
+    FILE *f = fopen("error.txt", "w");
+    if (f)
+    {
+      fprintf(f, "%s\n", errmsg);
+      fclose(f);
+    }
+    // not from a crash signal handler: calling into Java there can hang
+    if (strncmp(errmsg, "I_SignalHandler", 15) != 0)
+    {
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "PrBoom+ RT", errmsg, NULL);
+    }
+  }
+#endif
 #ifdef _WIN32
   if (!M_CheckParm ("-nodraw") && !capturing_video) {
     I_MessageBox(errmsg, PRB_MB_OK);

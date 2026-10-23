@@ -35,6 +35,7 @@
  *-----------------------------------------------------------------------------
  */
 
+#include "SDL/i_gamepad.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -736,6 +737,15 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 
   if (!walkcamera.type || menuactive) //e6y
     mousex = mousey = 0;
+
+  // game controllers: analog movement and turning
+  {
+    int pad_forward, pad_side, pad_turn;
+    I_Gamepad_GetMove(&pad_forward, &pad_side, &pad_turn);
+    forward += pad_forward;
+    side += pad_side;
+    cmd->angleturn -= pad_turn;
+  }
 #ifdef GL_DOOM
   motion_blur.curr_speed_pow2 = 0;
 #endif

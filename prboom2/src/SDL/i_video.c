@@ -33,6 +33,7 @@
  */
 
 #ifdef HAVE_CONFIG_H
+#include "i_gamepad.h"
 #include "config.h"
 #endif
 
@@ -51,6 +52,7 @@
 
 #include <SDL.h>
 #include <SDL_syswm.h>
+#include "ANDROID/android_touch.h"
 
 #include "m_argv.h"
 #include "doomstat.h"
@@ -241,6 +243,49 @@ static void I_GetEvent(void)
 
 while (SDL_PollEvent(Event))
 {
+#ifdef HAVE_TOUCH_CONTROLS
+  if (AndroidTouch_HandleEvent(Event))
+  {
+    continue;
+  }
+#endif
+  if (I_Gamepad_HandleEvent(Event))
+  {
+    continue;
+  }
+#ifdef __ANDROID__
+  // Android destroys the window's surface in the background and makes a new
+  // one on return; SDL blocks this loop while paused. RT swaps the surface
+  // at the start of the next frame.
+  switch (Event->type)
+  {
+    case SDL_APP_WILLENTERBACKGROUND: lprintf(LO_INFO, "Android: entering background\n"); break;
+    case SDL_APP_DIDENTERBACKGROUND:
+      lprintf(LO_INFO, "Android: in background\n");
+      // Android may kill a backgrounded app; that isn't a crash
+      remove("running.txt");
+      break;
+    case SDL_APP_WILLENTERFOREGROUND: lprintf(LO_INFO, "Android: entering foreground\n"); break;
+    case SDL_APP_DIDENTERFOREGROUND:
+      lprintf(LO_INFO, "Android: in foreground, recreating the surface\n");
+      {
+        FILE *f = fopen("running.txt", "w");
+        if (f) { fputs("running\n", f); fclose(f); }
+      }
+      if (V_GetMode() == VID_MODERT)
+      {
+        RT_OnAndroidWindowChanged();
+      }
+      break;
+    case SDL_APP_LOWMEMORY:           lprintf(LO_INFO, "Android: low memory\n"); break;
+    case SDL_APP_TERMINATING:
+      lprintf(LO_INFO, "Android: terminating\n");
+      I_SafeExit(0);
+      break;
+    case SDL_QUIT:                    lprintf(LO_INFO, "Android: quit requested\n"); break;
+    default: break;
+  }
+#endif
   switch (Event->type) {
   case SDL_KEYDOWN:
 #ifdef MACOSX
@@ -372,7 +417,11 @@ while (SDL_PollEvent(Event))
 
 void I_StartTic (void)
 {
+#ifdef HAVE_TOUCH_CONTROLS
+  AndroidTouch_Tic();
+#endif
   I_GetEvent();
+  I_Gamepad_Tic();
 
   I_ReadMouse();
 
@@ -412,6 +461,7 @@ static void I_InitInputs(void)
   }
 
   I_InitJoystick();
+  I_Gamepad_Init();
 }
 /////////////////////////////////////////////////////////////////////////////
 
@@ -616,6 +666,9 @@ void I_PreInitGraphics(void)
 
   // Initialize SDL
   unsigned int flags = 0;
+#ifdef HAVE_TOUCH_CONTROLS
+  AndroidTouch_Init(); // sets hints, must be before SDL_Init
+#endif
   if (!(M_CheckParm("-nodraw") && M_CheckParm("-nosound")))
     flags = SDL_INIT_VIDEO;
 #ifdef PRBOOM_DEBUG
@@ -1309,6 +1362,10 @@ void I_UpdateVideoMode(void)
   }
   else if (V_GetMode() == VID_MODERT)
   {
+    init_flags |= SDL_WINDOW_VULKAN;
+#ifdef __ANDROID__
+    init_flags |= SDL_WINDOW_FULLSCREEN;
+#endif
     sdl_window = SDL_CreateWindow(
         PACKAGE_NAME " " PACKAGE_VERSION,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -1503,8 +1560,12 @@ void I_UpdateVideoMode(void)
 
 static void ActivateMouse(void)
 {
+#ifndef __ANDROID__
+  // On Android this requests pointer capture on SDL's view, which is meant for
+  // physical mice and can swallow touchscreen input. Touch controls don't need it.
   SDL_SetRelativeMouseMode(SDL_TRUE);
   SDL_GetRelativeMouseState(NULL, NULL);
+#endif
 }
 
 static void DeactivateMouse(void)

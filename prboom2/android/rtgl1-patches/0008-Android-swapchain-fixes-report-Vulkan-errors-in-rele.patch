@@ -1,0 +1,167 @@
+From a8710500bc88e0a2ce7e6cae14d7c86629f4dbdd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 20:09:44 +0200
+Subject: [PATCH 08/11] Android swapchain fixes; report Vulkan errors in
+ release builds
+
+- composite alpha: pick a supported mode (Android surfaces usually only
+  offer INHERIT; OPAQUE was hardcoded)
+- Android: create without pre-rotation (IDENTITY) and size images from the
+  window, as currentExtent may be in the display's native orientation
+- RGBA8/BGRA8 UNORM fallbacks and a clear error if no format fits;
+  check swapchain image usage support
+- VK_CHECKERROR was assert-only, so release builds silently ignored Vulkan
+  errors; negative results now throw with the error code and location
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K7ddVeaJCm7c4L64HWexay
+---
+ Source/Common.cpp    | 12 +++++++++++
+ Source/Common.h      | 11 ++++++----
+ Source/Swapchain.cpp | 50 +++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 68 insertions(+), 5 deletions(-)
+
+diff --git a/Source/Common.cpp b/Source/Common.cpp
+index d69e078..81963e8 100644
+--- a/Source/Common.cpp
++++ b/Source/Common.cpp
+@@ -19,6 +19,8 @@
+ // SOFTWARE.
+ 
+ #include "Common.h"
++#include "RgException.h"
++#include <string>
+ 
+ 
+ namespace RTGL1
+@@ -106,3 +108,13 @@ void RTGL1::EndCmdLabel(VkCommandBuffer cmd)
+ 
+     svkCmdEndDebugUtilsLabelEXT(cmd);
+ }
++
++
++void RTGL1::ThrowVulkanError(VkResult r, const char *file, int line)
++{
++    const char *f = std::strrchr(file, '/');
++    f = f ? f + 1 : file;
++
++    throw RgException(RG_GRAPHICS_API_ERROR,
++        "Vulkan error " + std::to_string(static_cast<int>(r)) + " at " + f + ":" + std::to_string(line));
++}
+diff --git a/Source/Common.h b/Source/Common.h
+index 1a40f6b..c0396e4 100644
+--- a/Source/Common.h
++++ b/Source/Common.h
+@@ -65,10 +65,13 @@ void InitDeviceExtensionFunctions_DebugUtils(VkDevice device);
+ #pragma endregion
+ 
+ 
+-inline void VK_CHECKERROR(const VkResult r)
+-{
+-    assert(r == VK_SUCCESS);
+-}
++// Vulkan errors (negative results) throw in all builds, so a driver failure
++// is reported through rgGetResultDescription / pfnPrint instead of crashing later.
++// Positive results (VK_SUBOPTIMAL_KHR, VK_INCOMPLETE, ...) are not errors.
++[[noreturn]] void ThrowVulkanError(VkResult r, const char *file, int line);
++
++#define VK_CHECKERROR(r) \
++    do { const VkResult vk_check_r_ = (r); if (vk_check_r_ < 0) { RTGL1::ThrowVulkanError(vk_check_r_, __FILE__, __LINE__); } } while (0)
+ 
+ 
+ #define SET_DEBUG_NAME(device, obj, type, pName) AddDebugName((device), reinterpret_cast<uint64_t>(obj), (type), (pName))
+diff --git a/Source/Swapchain.cpp b/Source/Swapchain.cpp
+index 68ac65c..738d67b 100644
+--- a/Source/Swapchain.cpp
++++ b/Source/Swapchain.cpp
+@@ -19,6 +19,7 @@
+ // SOFTWARE.
+ 
+ #include "Swapchain.h"
++#include "RgException.h"
+ 
+ #include <algorithm>
+ 
+@@ -63,7 +64,10 @@ Swapchain::Swapchain(VkDevice device, VkSurfaceKHR surface,
+         std::vector<VkFormat> acceptFormats =
+         {
+             VK_FORMAT_R8G8B8A8_SRGB,
+-            VK_FORMAT_B8G8R8A8_SRGB
++            VK_FORMAT_B8G8R8A8_SRGB,
++            // fallbacks: colors are slightly off without sRGB encoding, but it runs
++            VK_FORMAT_R8G8B8A8_UNORM,
++            VK_FORMAT_B8G8R8A8_UNORM,
+         };
+ 
+         for (VkFormat f : acceptFormats)
+@@ -83,6 +87,11 @@ Swapchain::Swapchain(VkDevice device, VkSurfaceKHR surface,
+         }
+     }
+ 
++    if (surfaceFormat.format == VK_FORMAT_UNDEFINED)
++    {
++        throw RgException(RG_GRAPHICS_API_ERROR, "Surface doesn't support RGBA8 / BGRA8 swapchain formats");
++    }
++
+     // find present modes
+     {
+         uint32_t presentModeCount = 0;
+@@ -233,7 +242,15 @@ bool Swapchain::TryRecreate(uint32_t newWidth, uint32_t newHeight, bool vsync)
+     VK_CHECKERROR(r);
+ 
+     // normalize new extent
++#ifdef __ANDROID__
++    // Android reports a fixed currentExtent, which may be in the display's
++    // native (portrait) orientation. The swapchain is created without
++    // pre-rotation (see Create), so its images just need the window's size,
++    // which the compositor rotates and scales.
++    if (false)
++#else
+     if (surfCapabilities.currentExtent.width != UINT32_MAX && surfCapabilities.currentExtent.height != UINT32_MAX)
++#endif
+     {
+         newWidth  = surfCapabilities.currentExtent.width;
+         newHeight = surfCapabilities.currentExtent.height;
+@@ -303,8 +320,39 @@ void Swapchain::Create(uint32_t newWidth, uint32_t newHeight, bool vsync, VkSwap
+         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+         VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+     swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
++#ifdef __ANDROID__
++    // No pre-rotation: rendering is never rotated, the compositor does it
++    swapchainInfo.preTransform =
++        (surfCapabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ?
++        VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : surfCapabilities.currentTransform;
++#else
+     swapchainInfo.preTransform = surfCapabilities.currentTransform;
++#endif
++    // Android surfaces usually support only INHERIT
+     swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
++    for (VkCompositeAlphaFlagBitsKHR a : { VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
++                                           VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
++                                           VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
++                                           VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR })
++    {
++        if (surfCapabilities.supportedCompositeAlpha & a)
++        {
++            swapchainInfo.compositeAlpha = a;
++            break;
++        }
++    }
++    {
++        const VkImageUsageFlags needed = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++        if ((surfCapabilities.supportedUsageFlags & needed) != needed)
++        {
++            throw RgException(RG_GRAPHICS_API_ERROR, "Swapchain images don't support color attachment and transfer destination usage");
++        }
++        // keep TRANSFER_SRC only if available
++        if (!(surfCapabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
++        {
++            swapchainInfo.imageUsage &= ~VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
++        }
++    }
+     swapchainInfo.presentMode = vsync ? presentModeVsync : presentModeImmediate;
+     swapchainInfo.clipped = VK_FALSE;
+     swapchainInfo.oldSwapchain = oldSwapchain;
+-- 
+2.43.0
+

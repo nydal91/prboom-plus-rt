@@ -1,0 +1,86 @@
+From 8d0e3efdd9d95fef97df00bdd3d48be082cb1aeb Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 18:37:31 +0200
+Subject: [PATCH 06/11] Add notes on the ray query / Android port
+
+---
+ ANDROID_RAY_QUERY.md | 67 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 67 insertions(+)
+ create mode 100644 ANDROID_RAY_QUERY.md
+
+diff --git a/ANDROID_RAY_QUERY.md b/ANDROID_RAY_QUERY.md
+new file mode 100644
+index 0000000..f25007e
+--- /dev/null
++++ b/ANDROID_RAY_QUERY.md
+@@ -0,0 +1,67 @@
++# RTGL1 with VK_KHR_ray_query (Android port, part 1)
++
++Branch `ray-query-android`, based on **v1.1.1**, the version PrBoom+ RT
++(`sultim-t/prboom-plus-rt`, April 2022) was built against.
++
++The renderer no longer needs `VK_KHR_ray_tracing_pipeline`, which most
++Android GPUs don't expose. It needs:
++
++- `VK_KHR_ray_query`, `VK_KHR_acceleration_structure`, `VK_KHR_deferred_host_operations`
++- `VK_KHR_synchronization2`, Vulkan 1.2
++- features: `rayQuery`, `accelerationStructure`, `bufferDeviceAddress`,
++  `runtimeDescriptorArray`, `shaderSampledImageArrayNonUniformIndexing`,
++  `shaderFloat16`, `shaderInt16`, `multiview`, `samplerAnisotropy`,
++  `shaderStorageImageExtendedFormats`
++
++Other features are enabled only if present. Missing requirements and too-low
++descriptor limits fail at startup with a message naming them.
++
++## What changed
++
++| Commit | Change |
++|---|---|
++| Shaders: getTexture macro | builds with current glslang |
++| Portability | unified-memory fallback (phones have no host-visible non-device-local memory), optional validation layers / debug utils, VMA include |
++| Ray query | 4 raygen shaders -> compute shaders tracing with `rayQueryEXT`; closest-hit, miss and any-hit (alpha test) inlined; barriers and descriptor stages moved from ray tracing to compute; device selection and features for ray query |
++| 4 descriptor sets | path tracer bound 9 sets; Adreno 7xx allows 8 (older GPUs 4). Small sets are copied into one each frame |
++| Limit check | descriptor, workgroup and push constant limits checked at startup |
++
++## Verification (lavapipe, Mesa 25.2, software Vulkan)
++
++A test scene with alpha-tested, mirror and glass geometry, a sun, a sphere
++light and a dynamic object, rendered for 60 frames at 637x357 (not a multiple
++of the 8x8 workgroup):
++
++- output is **pixel-identical** to the original ray tracing pipeline build
++- a deliberately broken alpha test changes 6.5% of pixels, so the comparison detects real errors
++- no new validation messages; the descriptor set limit error is gone
++- all 42 shaders pass `spirv-val`
++
++Not verified: real Android hardware. Speed, driver bugs and format support
++can only be checked on the device.
++
++## Building
++
++Desktop (Linux):
++
++```
++cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRG_WITH_SURFACE_XLIB=ON
++cmake --build build
++mkdir -p Build && cd Source/Shaders && python3 GenerateShaders.py   # -> Build/*.spv
++```
++
++## Remaining work for Android
++
++1. **Surface**: add `VK_KHR_android_surface` (an `RgAndroidSurfaceCreateInfo`
++   taking an `ANativeWindow*`, like the existing Xlib/Win32 ones).
++2. **Build**: NDK toolchain (`-DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-30`);
++   link `libvulkan.so` from the NDK. Package `Build/*.spv`, the blue noise and
++   water normal `.ktx2` files as assets and load them through `RgInstanceCreateInfo::pfnOpenFile` /
++   `pfnCloseFile` (e.g. with `AAssetManager`), as Android assets are not
++   plain files.
++3. **PrBoom+ RT**: SDL2 Android project, touch controls, WAD location, and
++   passing the window to RTGL1.
++4. **On-device checks**: the B10G11R11 framebuffer is a blit destination with
++   linear upscaling (lavapipe lacks that format feature); run with the
++   validation layer packaged once to catch device-specific issues.
++5. **Performance**: start at a low render resolution with FSR upscaling.
+-- 
+2.43.0
+

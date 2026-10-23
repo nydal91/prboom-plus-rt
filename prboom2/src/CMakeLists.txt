@@ -193,6 +193,8 @@ set(MUS2MID_SRC
 
 set(SDLDOOM_SOURCES
     SDL/i_joy.c
+    SDL/i_gamepad.c
+    SDL/i_gamepad.h
     SDL/i_main.c
     SDL/i_network.c
     SDL/i_sound.c
@@ -337,7 +339,19 @@ function(AddGameExecutable TARGET SOURCES)
 
     add_definitions("-DUSE_EXPERIMENTAL_MUSIC")
 
-    add_executable(${TARGET} WIN32 ${SOURCES})
+    if(ANDROID)
+        # SDL's Java activity loads libmain.so and calls SDL_main
+        add_library(${TARGET} SHARED ${SOURCES})
+        set_target_properties(${TARGET} PROPERTIES OUTPUT_NAME main)
+        target_link_libraries(${TARGET} PRIVATE log android)
+        # GLU tessellator callbacks are passed as void(*)(void), as GLU requires;
+        # newer Clang makes that an error by default
+        target_compile_options(${TARGET} PRIVATE -Wno-error=incompatible-function-pointer-types)
+    else()
+        add_executable(${TARGET} WIN32 ${SOURCES})
+    endif()
+    # touch controls: compiled in on Android, or with -DPRBOOM_TOUCH_CONTROLS
+    target_sources(${TARGET} PRIVATE ANDROID/android_touch.c)
     target_include_directories(${TARGET} PRIVATE
         ${SDL2_INCLUDE_DIRS}
         ${CMAKE_BINARY_DIR}
@@ -438,7 +452,21 @@ function(AddGameExecutable TARGET SOURCES)
         )
         target_compile_definitions(${TARGET} PRIVATE RG_USE_SURFACE_WIN32)
     endif()
-    if(UNIX)
+    if(ANDROID)
+        # pass -DRTGL1_ANDROID_LIBRARY=<libRayTracedGL1.so built with RG_WITH_SURFACE_ANDROID>
+        set_target_properties(RayTracedGL1 PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "$ENV{RTGL1_SDK_PATH}/Include"
+            IMPORTED_LOCATION       "${RTGL1_ANDROID_LIBRARY}"
+        )
+        target_compile_definitions(${TARGET} PRIVATE RG_USE_SURFACE_ANDROID ZLIB_CONST)
+    elseif(UNIX AND DEFINED RTGL1_LIBRARY)
+        # explicit library, e.g. for a portable build
+        set_target_properties(RayTracedGL1 PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "$ENV{RTGL1_SDK_PATH}/Include"
+            IMPORTED_LOCATION       "${RTGL1_LIBRARY}"
+        )
+        target_compile_definitions(${TARGET} PRIVATE RG_USE_SURFACE_XLIB ZLIB_CONST)
+    elseif(UNIX)
         set_target_properties(RayTracedGL1 PROPERTIES
             INTERFACE_INCLUDE_DIRECTORIES "$ENV{RTGL1_SDK_PATH}/Include"
             IMPORTED_LOCATION       "$ENV{RTGL1_SDK_PATH}/Build/RelWithDebInfo/libRayTracedGL1.so"

@@ -1,0 +1,145 @@
+From c6dc37c88e9a8d947a5bb73598d87953e7bf7644 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 18:21:06 +0200
+Subject: [PATCH 02/11] Portability: unified memory fallback, optional
+ validation layers/debug utils, VMA snprintf include
+
+Needed for Linux and Android, independent of ray tracing:
+- On unified memory GPUs (Adreno, Mali, lavapipe) every host-visible memory
+  type is also device-local; the old lookup threw. Prefer the old choice,
+  fall back to any suitable type.
+- Only request validation layers / debug extensions that are present.
+  VK_LAYER_LUNARG_monitor is deprecated and made instance creation fail.
+- vk_mem_alloc.h needs <cstdio> on non-Windows.
+---
+ Source/PhysicalDevice.cpp       | 34 +++++++++++++++----------
+ Source/Vma/vk_mem_alloc_imp.cpp |  3 +++
+ Source/VulkanDevice.cpp         | 44 ++++++++++++++++++++++++++++++---
+ 3 files changed, 64 insertions(+), 17 deletions(-)
+
+diff --git a/Source/PhysicalDevice.cpp b/Source/PhysicalDevice.cpp
+index 9baae3d..2124c4c 100644
+--- a/Source/PhysicalDevice.cpp
++++ b/Source/PhysicalDevice.cpp
+@@ -100,24 +100,32 @@ uint32_t PhysicalDevice::GetMemoryTypeIndex(uint32_t memoryTypeBits, VkFlags req
+     }
+     
+ 
+-    // for each memory type available for this device
+-    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
++    // First pass: a type without the ignored flags (desktop: separate VRAM and system memory).
++    // Second pass: any suitable type, as on unified memory GPUs (Android, integrated)
++    // every host visible type is also device local.
++    for (bool allowIgnored : { false, true })
+     {
+-        // if type is available
+-        if ((memoryTypeBits & 1u) == 1)
+-        {
+-            VkMemoryPropertyFlags flags = memoryProperties.memoryTypes[i].propertyFlags;
++        uint32_t bits = memoryTypeBits;
+ 
+-            bool isSuitable = (flags & requirementsMask) == requirementsMask;
+-            bool isIgnored = (flags & flagsToIgnore) == flagsToIgnore;
+-            
+-            if (isSuitable && !isIgnored)
++        // for each memory type available for this device
++        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
++        {
++            // if type is available
++            if ((bits & 1u) == 1)
+             {
+-                return i;
++                VkMemoryPropertyFlags flags = memoryProperties.memoryTypes[i].propertyFlags;
++
++                bool isSuitable = (flags & requirementsMask) == requirementsMask;
++                bool isIgnored = (flags & flagsToIgnore) == flagsToIgnore;
++
++                if (isSuitable && (!isIgnored || allowIgnored))
++                {
++                    return i;
++                }
+             }
+-        }
+ 
+-        memoryTypeBits >>= 1u;
++            bits >>= 1u;
++        }
+     }
+ 
+     throw RgException(RG_GRAPHICS_API_ERROR, "Can't find memory type for given memory property flags (" + std::to_string(requirementsMask) + ")");
+diff --git a/Source/Vma/vk_mem_alloc_imp.cpp b/Source/Vma/vk_mem_alloc_imp.cpp
+index 00317e0..677bbd7 100644
+--- a/Source/Vma/vk_mem_alloc_imp.cpp
++++ b/Source/Vma/vk_mem_alloc_imp.cpp
+@@ -1,2 +1,5 @@
++// snprintf is used by VMA, but not included on non-Windows platforms
++#include <cstdio>
++
+ #define VMA_IMPLEMENTATION
+ #include "vk_mem_alloc.h"
+\ No newline at end of file
+diff --git a/Source/VulkanDevice.cpp b/Source/VulkanDevice.cpp
+index 9e644b6..b30631a 100644
+--- a/Source/VulkanDevice.cpp
++++ b/Source/VulkanDevice.cpp
+@@ -1415,8 +1415,26 @@ void VulkanDevice::CreateInstance(const RgInstanceCreateInfo &info)
+ 
+     if (enableValidationLayer)
+     {
+-        layerNames.push_back("VK_LAYER_KHRONOS_validation");
+-        layerNames.push_back("VK_LAYER_LUNARG_monitor");
++        // only request layers that are installed: VK_LAYER_LUNARG_monitor is long deprecated,
++        // and Android has no layers unless they're packaged with the app
++        uint32_t layerCount = 0;
++        std::vector<VkLayerProperties> availableLayers;
++        if (vkEnumerateInstanceLayerProperties(&layerCount, nullptr) == VK_SUCCESS)
++        {
++            availableLayers.resize(layerCount);
++            vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
++        }
++
++        for (const char *n : { "VK_LAYER_KHRONOS_validation", "VK_LAYER_LUNARG_monitor" })
++        {
++            const bool isAvailable = std::any_of(availableLayers.cbegin(), availableLayers.cend(),
++                [n](const VkLayerProperties &l) { return !std::strcmp(l.layerName, n); });
++
++            if (isAvailable)
++            {
++                layerNames.push_back(n);
++            }
++        }
+     }
+ 
+     std::vector<VkExtensionProperties> supportedInstanceExtensions;
+@@ -1456,8 +1474,26 @@ void VulkanDevice::CreateInstance(const RgInstanceCreateInfo &info)
+ 
+     if (enableValidationLayer)
+     {
+-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+-        extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
++        for (const char *n : { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_EXTENSION_NAME })
++        {
++            const bool isSupported = std::any_of(supportedInstanceExtensions.cbegin(), supportedInstanceExtensions.cend(),
++                [n](const VkExtensionProperties &ext) { return !std::strcmp(ext.extensionName, n); });
++
++            if (isSupported)
++            {
++                extensions.push_back(n);
++            }
++        }
++
++        // debug names, labels and the messenger need VK_EXT_debug_utils;
++        // on Android it's only exposed when a validation layer is packaged with the app
++        const bool hasDebugUtils = std::any_of(extensions.cbegin(), extensions.cend(),
++            [](const char *n) { return !std::strcmp(n, VK_EXT_DEBUG_UTILS_EXTENSION_NAME); });
++
++        if (!hasDebugUtils)
++        {
++            enableValidationLayer = false;
++        }
+     }
+ 
+     for (const char *n : DLSS::GetDlssVulkanInstanceExtensions())
+-- 
+2.43.0
+

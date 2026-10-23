@@ -34,6 +34,7 @@
  *-----------------------------------------------------------------------------*/
 
 #ifdef HAVE_CONFIG_H
+#include "SDL/i_gamepad.h"
 #include "config.h"
 #endif
 
@@ -433,7 +434,12 @@ default_t defaults[] =
    def_int,ss_none}, // select music driver (DOS), -1 is autodetect, 0 is none"; in Linux, non-zero enables music
   {"pitched_sounds",{&pitched_sounds},{1},0,1, // killough 2/21/98
    def_bool,ss_none}, // enables variable pitch in sound effects (from id's original code)
+#ifdef __ANDROID__
+  // phones mix at 48 kHz: avoids SDL resampling
+  {"samplerate",{&snd_samplerate},{48000},11025,48000, def_int,ss_none},
+#else
   {"samplerate",{&snd_samplerate},{44100},11025,48000, def_int,ss_none},
+#endif
   {"slice_samplecount",{&snd_samplecount},{512},32,8192, def_int,ss_none},
   {"sfx_volume",{&snd_SfxVolume},{8},0,15, def_int,ss_none},
   {"music_volume",{&snd_MusicVolume},{8},0,15, def_int,ss_none},
@@ -444,6 +450,10 @@ default_t defaults[] =
 #ifdef _WIN32
   {"snd_midiplayer",{NULL, &snd_midiplayer},{0,"fluidsynth"},UL,UL,def_str,ss_none},
   {"snd_soundfont",{NULL, &snd_soundfont},{0,"TimGM6mb.sf2"},UL,UL,def_str,ss_none}, // soundfont name for synths that support it
+#elif !defined(HAVE_MIXER)
+  // without SDL_mixer, the built-in OPL2 synth plays the music
+  {"snd_midiplayer",{NULL, &snd_midiplayer},{0,"opl2"},UL,UL,def_str,ss_none},
+  {"snd_soundfont",{NULL, &snd_soundfont},{0,"/usr/share/sounds/sf3/default-GM.sf3"},UL,UL,def_str,ss_none}, // soundfont name for synths that support it
 #else
   {"snd_midiplayer",{NULL, &snd_midiplayer},{0,"sdl"},UL,UL,def_str,ss_none},
   {"snd_soundfont",{NULL, &snd_soundfont},{0,"/usr/share/sounds/sf3/default-GM.sf3"},UL,UL,def_str,ss_none}, // soundfont name for synths that support it
@@ -460,7 +470,7 @@ default_t defaults[] =
   {"mus_fluidsynth_chorus",{&mus_fluidsynth_chorus},{0},0,1,def_bool,ss_none},
   {"mus_fluidsynth_reverb",{&mus_fluidsynth_reverb},{0},0,1,def_bool,ss_none},
   {"mus_fluidsynth_gain",{&mus_fluidsynth_gain},{50},0,1000,def_int,ss_none}, // NSM  fine tune fluidsynth output level
-  {"mus_opl_gain",{&mus_opl_gain},{50},0,1000,def_int,ss_none}, // NSM  fine tune opl output level
+  {"mus_opl_gain",{&mus_opl_gain},{100},0,1000,def_int,ss_none}, // NSM  fine tune opl output level
 
   {"Video settings",{NULL},{0},UL,UL,def_none,ss_none},
   {"videomode",{NULL, &default_videomode},{0,"RT"},UL,UL,def_str,ss_none},
@@ -502,8 +512,14 @@ default_t defaults[] =
   {"Ray tracing settings",{NULL},{0},UL,UL,def_none,ss_none},
   {"rt_dlss",{&rt_settings.dlss},{0},0,4,
    def_int,ss_none },
+#ifdef __ANDROID__
+  // phones: FSR performance mode (half resolution) by default
+  {"rt_fsr",{&rt_settings.fsr},{3},0,4,
+   def_int,ss_none },
+#else
   {"rt_fsr",{&rt_settings.fsr},{0},0,4,
    def_int,ss_none },
+#endif
   {"rt_renderscale",{&rt_settings.renderscale},{RT_SETTINGS_RENDERSCALE_720},0,RT_SETTINGS_RENDERSCALE_NUM-1,
    def_int,ss_none },
   {"rt_bloom_intensity",{&rt_settings.bloom_intensity},{2},0,3,
@@ -512,6 +528,10 @@ default_t defaults[] =
    def_int,ss_none },
   {"rt_muzzleflash_intensity",{&rt_settings.muzzleflash_intensity},{1},0,1,
    def_int,ss_none},
+  {"show_fps",{&show_fps},{0},0,1,
+   def_bool,ss_none},
+  {"gamepad_rumble",{&gamepad_rumble},{1},0,1,
+   def_bool,ss_none},
   {"rt_statusbar_scale",{&rt_settings.statusbar_scale},{5},0,9,
    def_int,ss_none},
 #if RT_SEPARATE_HUD_SCALE

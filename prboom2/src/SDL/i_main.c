@@ -36,6 +36,7 @@
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
+#include <SDL.h>
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -465,6 +466,22 @@ void I_SafeExit(int rc)
 {
   atexit_listentry_t *entry;
 
+#ifdef __ANDROID__
+  // Save the config and end the process: tearing down SDL, sound and the
+  // renderer from this thread races with SDL's Java side and aborted
+  // ("pthread_mutex_lock called on a destroyed mutex"). Android frees it all.
+  if (rc == 0)
+  {
+    M_SaveDefaults();
+    // the launcher treats a leftover marker as a crash
+    remove("running.txt");
+  }
+  lprintf(LO_INFO, "I_SafeExit: %d\n", rc);
+  fflush(stdout);
+  fflush(stderr);
+  _exit(rc);
+#endif
+
   // Run through all exit functions
 
   while ((entry = exit_funcs))
@@ -502,10 +519,19 @@ static void I_SetAffinityMask(void)
 {
   // Forcing single core only for "SDL MIDI Player"
   process_affinity_mask = 0;
+#ifndef __ANDROID__
+  // Not on Android: there's no SDL_mixer, and pinning the game, audio and GPU
+  // driver threads to core 0 (often a slow efficiency core) made sound stutter
+#ifdef HAVE_MIXER
+  // only SDL_mixer needs it; without it, sound and the renderer would share core 0
   if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
+#else
+  if (0)
+#endif
   {
     process_affinity_mask = 1;
   }
+#endif
 
   // Set the process affinity mask so that all threads
   // run on the same processor.  This is a workaround for a bug in 
@@ -623,6 +649,29 @@ int main(int argc, char **argv)
       fprintf(stderr, "Failed to revoke setuid\n");
     else
       fprintf(stderr, "Revoked uid %d\n",stored_euid);
+#endif
+
+#ifdef __ANDROID__
+  // The Java activity extracts the game data to the app's internal storage
+  // and points HOME there; config and saves go to $HOME/.prboom-plus.
+  {
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+    {
+      home = SDL_AndroidGetInternalStoragePath();
+      setenv("HOME", home, 1);
+    }
+    chdir(home);
+
+    // Engine log for the error report LauncherActivity shows after a failure;
+    // unbuffered, so it's complete even after a crash
+    if (freopen("prboom.log", "w", stdout))
+    {
+      setvbuf(stdout, NULL, _IONBF, 0);
+      dup2(fileno(stdout), fileno(stderr));
+      setvbuf(stderr, NULL, _IONBF, 0);
+    }
+  }
 #endif
 
   myargc = argc;

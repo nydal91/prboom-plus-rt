@@ -67,6 +67,13 @@ void M_Init (void);
 
 void M_StartControlPanel (void);
 
+// touch screens: tap on a menu item, see m_menu.c
+int M_TouchTap(float nx, float ny);
+
+// frame rate counter, see "Show FPS" in Display Options
+extern int show_fps;
+void M_DrawFPS(void);
+
 void M_ForcedLoadGame(const char *msg); // killough 5/15/98: forced loadgames
 
 void M_Trans(void);          // killough 11/98: reset translucency
@@ -183,5 +190,7 @@ typedef struct setup_menu_s
   void (*action)(void); /* killough 10/98: function to call after changing */
   const char **selectstrings; /* list of strings for choice value */
 } setup_menu_t;
+
+dboolean RT_IsClassicHUDEnabled(void); // defined in m_menu.c
 
 #endif

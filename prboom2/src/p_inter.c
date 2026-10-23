@@ -31,6 +31,7 @@
  *
  *-----------------------------------------------------------------------------*/
 
+#include "SDL/i_gamepad.h"
 #include "doomstat.h"
 #include "dstrings.h"
 #include "m_random.h"
@@ -925,6 +926,12 @@ void P_DamageMobj(mobj_t *target,mobj_t *inflictor, mobj_t *source, int damage)
 
       player->attacker = source;
       player->damagecount += damage;  // add damage after armor / invuln
+
+      if (player == &players[consoleplayer] && damage > 0)
+      {
+        float f = damage >= 40 ? 1.0f : 0.3f + 0.7f * damage / 40.0f;
+        I_Gamepad_Rumble(f, f * 0.7f, damage >= 60 ? 500 : 200 + damage * 5);
+      }
 
       if (player->damagecount > 100)
         player->damagecount = 100;  // teleport stomp does 10k points...

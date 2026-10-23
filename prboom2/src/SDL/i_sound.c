@@ -489,8 +489,10 @@ static void I_UpdateSound(void *unused, Uint8 *stream, int len)
   // Mixing channel index.
   int       chan;
 
-  if (snd_midiplayer == NULL) // This is but a temporary fix. Please do remove after a more definitive one!
-    memset(stream, 0, len);
+  // SDL2 doesn't clear the buffer before calling us, and sound effects are
+  // added on top of what it holds: start from silence (music below writes
+  // over it when it plays), or old audio loops and piles up into noise
+  memset(stream, 0, len);
 
   // NSM: when dumping sound, ignore the callback calls and only
   // service dumping calls
@@ -1635,6 +1637,15 @@ void M_ChangeMIDIPlayer(void)
   snd_midiplayer = strdup(midiplayers[midi_player_sdl]);
   use_experimental_music = 0;
   return;
+#endif
+
+#ifndef HAVE_MIXER
+  // "sdl" means SDL_mixer, which isn't built in: play the music with the
+  // built-in OPL2 synth (the Sound Blaster / AdLib sound of DOS Doom) instead
+  if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
+  {
+    snd_midiplayer = midiplayers[midi_player_opl2];
+  }
 #endif
 
   if (!strcasecmp(snd_midiplayer, midiplayers[midi_player_sdl]))
